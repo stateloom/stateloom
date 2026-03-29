@@ -1,0 +1,39 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      dev-deps:
+        patterns:
+          - "pytest*"
+          - "ruff"
+          - "mypy"
+          - "respx"
+        update-types:
+          - "minor"
+          - "patch"
+      core-deps:
+        patterns:
+          - "pydantic*"
+          - "fastapi"
+          - "uvicorn*"
+          - "httpx"
+          - "rich"
+          - "wrapt"
+          - "tiktoken"
+          - "websockets"
+          - "pyyaml"
+          - "click"
+        update-types:
+          - "patch"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - ci

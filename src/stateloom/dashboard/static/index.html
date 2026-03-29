@@ -1,0 +1,1872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StateLoom Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css?v=10">
+</head>
+<body>
+    <div id="dev-mode-banner" style="display:none;">
+        &#9888; UNLICENSED DEV MODE &mdash; Not for production use.
+        <a href="https://stateloom.io/pricing" target="_blank" style="color:#fff;text-decoration:underline;margin-left:8px;">Get a License</a>
+    </div>
+    <nav id="sidebar">
+        <div class="logo">
+            <h1>StateLoom</h1>
+            <span class="version">v0.1.0</span>
+        </div>
+        <ul class="nav-links">
+            <li><a href="#" data-view="overview" class="active">Live Overview</a></li>
+            <li><a href="#" data-view="sessions">Sessions</a></li>
+            <li><a href="#" data-view="jobs">Async Jobs</a></li>
+            <li><a href="#" data-view="models">Models</a></li>
+            <li><a href="#" data-view="experiments">Experiments</a></li>
+            <li><a href="#" data-view="agents">Agents</a></li>
+            <li><a href="#" data-view="consensus">Consensus</a></li>
+            <li><a href="#" data-view="compliance">Compliance</a></li>
+            <li><a href="#" data-view="security">Security</a></li>
+            <li><a href="#" data-view="observability">Observability</a></li>
+            <li><a href="#" data-view="settings">Settings</a></li>
+            <li id="nav-server-logs" style="display:none;"><a href="#" data-view="server-logs">Server Logs</a></li>
+        </ul>
+        <div class="nav-footer">
+            <div id="nav-username" class="nav-username" style="display:none;"></div>
+            <button class="btn-restart" id="btn-restart" onclick="restartServer()" title="Restart StateLoom server">Restart Server</button>
+            <div id="ws-status" class="ws-disconnected">Disconnected</div>
+        </div>
+    </nav>
+
+    <main id="content">
+        <!-- Overview View -->
+        <div id="view-overview" class="view active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Cost</div>
+                    <div class="stat-value" id="stat-total-cost">$0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Sessions</div>
+                    <div class="stat-value" id="stat-active-sessions">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Calls</div>
+                    <div class="stat-value" id="stat-total-calls">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Cache Savings</div>
+                    <div class="stat-value" id="stat-cache-savings">$0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Cloud Calls</div>
+                    <div class="stat-value" id="stat-cloud-calls">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Local Calls</div>
+                    <div class="stat-value" id="stat-local-calls">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">PII Detections</div>
+                    <div class="stat-value" id="stat-pii-detections">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Guardrail Detections</div>
+                    <div class="stat-value" id="stat-guardrail-detections">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Cache Hits</div>
+                    <div class="stat-value" id="stat-cache-hits">0</div>
+                </div>
+            </div>
+
+            <h2>Live Event Stream</h2>
+            <div id="event-stream" class="event-stream">
+                <div class="empty-state">No events yet. Make an LLM call to see activity here.</div>
+            </div>
+        </div>
+
+        <!-- Sessions View -->
+        <div id="view-sessions" class="view">
+            <h2>Sessions</h2>
+            <table id="sessions-table" class="data-table">
+                <thead>
+                    <tr>
+                        <th>Session ID</th>
+                        <th>Status</th>
+                        <th>Cost</th>
+                        <th>Tokens</th>
+                        <th>Calls</th>
+                        <th>Cache Hits</th>
+                        <th>PII</th>
+                        <th>Org</th>
+                        <th>Team</th>
+                        <th>Started</th>
+                    </tr>
+                </thead>
+                <tbody id="sessions-tbody">
+                </tbody>
+            </table>
+            <div id="sessions-pagination" class="pagination-controls">
+                <button onclick="sessionsPagePrev()" id="sessions-prev-btn" class="btn btn-sm" disabled>&larr; Previous</button>
+                <span id="sessions-page-info" class="pagination-info">Page 1</span>
+                <button onclick="sessionsPageNext()" id="sessions-next-btn" class="btn btn-sm">Next &rarr;</button>
+            </div>
+        </div>
+
+        <!-- Async Jobs View -->
+        <div id="view-jobs" class="view">
+            <h2>Async Jobs</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Jobs</div>
+                    <div class="stat-value" id="jobs-stat-total">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Running</div>
+                    <div class="stat-value" id="jobs-stat-running">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Completed</div>
+                    <div class="stat-value" id="jobs-stat-completed">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Failed</div>
+                    <div class="stat-value" id="jobs-stat-failed">0</div>
+                </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                <select class="settings-select" id="jobs-status-filter">
+                    <option value="">All Statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="running">Running</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="loadJobs()">Refresh</button>
+            </div>
+
+            <table id="jobs-table" class="data-table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Status</th>
+                        <th>Provider</th>
+                        <th>Model</th>
+                        <th>Team</th>
+                        <th>Session</th>
+                        <th>Created</th>
+                        <th>Started</th>
+                        <th>Completed</th>
+                        <th>Retries</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody id="jobs-tbody">
+                </tbody>
+            </table>
+
+            <div id="job-detail-panel" class="experiment-detail-panel" style="display:none;">
+                <div class="experiment-detail-header">
+                    <h3 id="job-detail-title"></h3>
+                    <span id="job-detail-status" class="status-badge"></span>
+                    <button class="experiment-detail-close" onclick="closeJobDetail()">&times;</button>
+                </div>
+                <div id="job-detail-content"></div>
+            </div>
+        </div>
+
+        <!-- Models View (Cloud + Local + Testing) -->
+        <div id="view-models" class="view">
+            <h2>Models</h2>
+
+            <div class="sub-tabs">
+                <button class="sub-tab active" onclick="switchModelsTab('overview')">Overview</button>
+                <button class="sub-tab" onclick="switchModelsTab('testing')">Testing</button>
+            </div>
+
+            <!-- Overview Tab -->
+            <div id="models-tab-overview" class="sub-tab-content active">
+
+            <!-- Cloud Section -->
+            <div class="section-header"><h3>Cloud</h3></div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Default Model</div>
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+                        <select id="models-default-model" class="select-model" onchange="saveDefaultModel()" style="flex:1;min-width:0;">
+                            <option value="">None</option>
+                        </select>
+                        <span class="save-flash" id="flash-default-model">Saved!</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Cloud Spend</div>
+                    <div class="stat-value" id="models-cloud-spend">$0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Cloud Calls</div>
+                    <div class="stat-value" id="models-cloud-calls">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Top Model</div>
+                    <div class="stat-value" id="models-top-model" style="font-size:14px;word-break:break-all;">&mdash;</div>
+                </div>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card wide">
+                    <div class="stat-label">Cost by Model</div>
+                    <div id="cost-by-model" class="chart-area"></div>
+                </div>
+            </div>
+
+            <!-- Provider API Keys Section -->
+            <div class="section-header"><h3>Provider API Keys</h3></div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">OpenAI</div>
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+                        <input type="password" id="key-openai" class="settings-input" placeholder="sk-..." style="flex:1;min-width:0;">
+                        <button class="btn btn-primary btn-sm" onclick="saveProviderKey('openai')">Save</button>
+                    </div>
+                    <div id="key-status-openai" style="font-size:12px;margin-top:6px;color:var(--text-secondary);">Not configured</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Anthropic</div>
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+                        <input type="password" id="key-anthropic" class="settings-input" placeholder="sk-ant-..." style="flex:1;min-width:0;">
+                        <button class="btn btn-primary btn-sm" onclick="saveProviderKey('anthropic')">Save</button>
+                    </div>
+                    <div id="key-status-anthropic" style="font-size:12px;margin-top:6px;color:var(--text-secondary);">Not configured</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Google (Gemini)</div>
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+                        <input type="password" id="key-google" class="settings-input" placeholder="AIza..." style="flex:1;min-width:0;">
+                        <button class="btn btn-primary btn-sm" onclick="saveProviderKey('google')">Save</button>
+                    </div>
+                    <div id="key-status-google" style="font-size:12px;margin-top:6px;color:var(--text-secondary);">Not configured</div>
+                </div>
+            </div>
+
+            <!-- Local Section -->
+            <div class="section-header"><h3>Local</h3></div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Ollama Status</div>
+                    <div class="stat-value" id="local-ollama-status">
+                        <span class="status-offline">Offline</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Force Local Routing</div>
+                    <div class="stat-value">
+                        <div class="config-controls">
+                            <label class="toggle-switch toggle-switch-warning">
+                                <input type="checkbox" id="force-local-toggle" onchange="toggleForceLocal(this.checked)">
+                                <span class="toggle-slider toggle-slider-warning"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Auto-Route</div>
+                    <div class="stat-value">
+                        <div class="config-controls">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="auto-route-toggle" onchange="toggleAutoRoute(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Local Model</div>
+                    <div class="stat-value">
+                        <select id="active-model-select" class="select-model" onchange="updateActiveModel(this.value)">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Downloaded Models -->
+            <div class="section-header">
+                <h3>Downloaded Models</h3>
+            </div>
+            <table class="data-table" id="local-models-table">
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Size</th>
+                        <th>Modified</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="local-models-tbody">
+                </tbody>
+            </table>
+
+            <!-- Hot-Swap -->
+            <div class="section-header">
+                <h3>Hot-Swap Model</h3>
+            </div>
+            <div class="settings-section">
+                <div class="settings-row">
+                    <span class="settings-label">New Model</span>
+                    <span class="settings-value">
+                        <select id="hot-swap-model" class="select-model" style="width:200px;">
+                            <option value="">Select model...</option>
+                        </select>
+                    </span>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Delete Old Model</span>
+                    <span class="settings-value">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="hot-swap-delete-old">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </span>
+                </div>
+                <div class="settings-save-row">
+                    <button class="btn btn-primary btn-sm" id="hot-swap-btn" onclick="startHotSwap()">Start Hot-Swap</button>
+                </div>
+                <div id="hot-swap-progress" style="display:none;margin-top:16px;">
+                    <div class="hot-swap-phase" id="hot-swap-phase-label">Pulling...</div>
+                    <div class="budget-bar" style="margin-top:8px;">
+                        <div class="budget-progress" id="hot-swap-bar" style="width:0%"></div>
+                    </div>
+                    <div class="hot-swap-detail" id="hot-swap-pct" style="margin-top:6px;">0%</div>
+                </div>
+            </div>
+
+            <!-- Recommended Models -->
+            <div class="section-header">
+                <h3>Recommended Models</h3>
+            </div>
+            <div id="hw-summary" class="hw-summary" style="display:none;"></div>
+            <div id="recommended-models" class="model-cards"></div>
+
+            </div><!-- end models-tab-overview -->
+
+            <!-- Testing Tab -->
+            <div id="models-tab-testing" class="sub-tab-content">
+
+            <p style="color:var(--text-secondary);margin-bottom:20px;">
+                Test candidate models against your production cloud model automatically.
+                When enabled, every cloud LLM call also fires a parallel call to the candidate model in the background &mdash;
+                no explicit traffic needed. Just use your app normally and StateLoom compares responses for you.
+            </p>
+
+            <div id="mt-enterprise-banner" class="mt-enterprise-banner" style="display:none;padding:16px 20px;margin-bottom:20px;border-radius:8px;border-left:4px solid var(--accent-yellow, #facc15);background:linear-gradient(135deg, rgba(250,204,21,0.08), rgba(250,204,21,0.02));">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                    <span style="font-size:18px;">&#128274;</span>
+                    <strong style="color:var(--text-primary);">Enterprise Feature</strong>
+                </div>
+                <p style="color:var(--text-secondary);margin:0;font-size:13px;">
+                    Model Testing requires an enterprise license.
+                    Set STATELOOM_LICENSE_KEY to unlock.
+                </p>
+            </div>
+
+            <!-- Config Section -->
+            <div id="mt-config-section">
+            <div class="section-header"><h3>Configuration</h3></div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Model Testing</div>
+                    <div class="stat-value">
+                        <div class="config-controls">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="mt-toggle" onchange="toggleShadow(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Candidate Model</div>
+                    <div class="stat-value">
+                        <select id="mt-model-select" class="select-model" onchange="updateShadowModel(this.value)">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Sampling Rate</div>
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+                        <input type="range" id="mt-sample-rate" min="0" max="100" value="100" oninput="document.getElementById('mt-sample-label').textContent=this.value+'%'" onchange="updateMTSampleRate(this.value/100)" style="flex:1;">
+                        <span id="mt-sample-label" style="min-width:36px;text-align:right;font-size:14px;">100%</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Max Context Tokens</div>
+                    <div style="margin-top:10px;">
+                        <input type="number" id="mt-max-tokens" class="settings-input" value="8192" min="256" max="1000000" style="width:100%;" onchange="updateMTMaxTokens(this.value)">
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Similarity Method</div>
+                    <div style="margin-top:10px;">
+                        <select id="mt-similarity-method" class="select-model" onchange="updateSimilarityMethod(this.value)">
+                            <option value="auto">Auto (semantic → difflib)</option>
+                            <option value="semantic">Semantic (embeddings)</option>
+                            <option value="difflib">Difflib (character)</option>
+                        </select>
+                        <div id="mt-similarity-status" style="margin-top:8px;font-size:12px;"></div>
+                    </div>
+                </div>
+            </div>
+            </div>
+
+            <!-- Metrics Section -->
+            <div class="section-header"><h3>Test Metrics</h3></div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Test Runs</div>
+                    <div class="stat-value" id="mt-total-calls">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Success Rate</div>
+                    <div class="stat-value" id="mt-success-rate">0%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Cost Saved</div>
+                    <div class="stat-value" id="mt-cost-saved">$0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Similarity</div>
+                    <div class="stat-value" id="mt-avg-similarity">&mdash;</div>
+                </div>
+            </div>
+
+            <!-- Filtering Funnel -->
+            <div class="section-header"><h3>Filtering Funnel</h3></div>
+            <div class="stats-grid">
+                <div class="stat-card wide">
+                    <div id="mt-funnel" class="mt-funnel">
+                        <div class="mt-funnel-step">
+                            <div class="mt-funnel-bar mt-funnel-total" id="mt-funnel-total-bar" style="width:100%"></div>
+                            <span class="mt-funnel-label">Total Calls <strong id="mt-funnel-total">0</strong></span>
+                        </div>
+                        <div class="mt-funnel-step">
+                            <div class="mt-funnel-bar mt-funnel-eligible" id="mt-funnel-eligible-bar" style="width:0%"></div>
+                            <span class="mt-funnel-label">Eligible <strong id="mt-funnel-eligible">0</strong></span>
+                        </div>
+                        <div class="mt-funnel-step">
+                            <div class="mt-funnel-bar mt-funnel-tested" id="mt-funnel-tested-bar" style="width:0%"></div>
+                            <span class="mt-funnel-label">Tested <strong id="mt-funnel-tested">0</strong></span>
+                        </div>
+                    </div>
+                    <div id="mt-skip-reasons" style="margin-top:12px;font-size:12px;color:var(--text-secondary);"></div>
+                </div>
+            </div>
+
+            <!-- Readiness Report -->
+            <div class="section-header"><h3>Readiness Report</h3></div>
+            <div id="mt-readiness" class="stats-grid">
+                <div class="stat-card wide" id="mt-readiness-empty-card">
+                    <div class="empty-state">Run model tests to generate readiness scores. Enable testing above, select a candidate model, then use your app normally.</div>
+                </div>
+            </div>
+
+            <!-- Enterprise Roadmap -->
+            <div class="section-header"><h3>Enterprise Roadmap</h3></div>
+            <div class="stats-grid">
+                <div class="stat-card mt-coming-soon">
+                    <div class="mt-coming-soon-badge">Enterprise</div>
+                    <div class="mt-coming-soon-icon">&#x1F512;</div>
+                    <div class="stat-label" style="font-size:16px;font-weight:600;margin-bottom:8px;">Dark Launching</div>
+                    <p style="color:var(--text-secondary);font-size:13px;line-height:1.5;">
+                        Mirror live production traffic to candidate models. Check functional equivalence &mdash; not just text similarity:
+                        valid JSON schemas, correct tool calls, matching response structure.
+                        Get a live migration confidence score.
+                    </p>
+                </div>
+                <div class="stat-card mt-coming-soon">
+                    <div class="mt-coming-soon-badge">Enterprise</div>
+                    <div class="mt-coming-soon-icon">&#x1F512;</div>
+                    <div class="stat-label" style="font-size:16px;font-weight:600;margin-bottom:8px;">Distillation Flywheel</div>
+                    <p style="color:var(--text-secondary);font-size:13px;line-height:1.5;">
+                        Automatically generate fine-tuning datasets from your production traffic.
+                        When a local SLM fails where the cloud model succeeds, StateLoom collects the prompt + correct response
+                        as a Chosen/Rejected training pair in .jsonl format.
+                    </p>
+                </div>
+            </div>
+
+            </div><!-- end models-tab-testing -->
+        </div>
+
+        <!-- Session Detail View (Enhanced) -->
+        <div id="view-session-detail" class="view">
+            <div class="session-detail-header">
+                <h2><span id="detail-session-name" style="display:none;"></span>Session Detail: <span id="detail-session-id"></span><span id="detail-duration" class="detail-duration"></span></h2>
+                <div class="session-detail-actions">
+                    <button id="close-session-btn" class="close-session-btn" onclick="closeSession()" title="Mark session as completed">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.25 4.75l-6.5 6.5-3.5-3.5"/></svg>
+                        Close Session
+                    </button>
+                    <button class="export-btn" onclick="exportSession()" title="Export session as JSON bundle">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M5 7l3 3 3-3"/><path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>
+                        Export
+                    </button>
+                </div>
+            </div>
+            <div id="detail-experiment-badge" class="experiment-badge" style="display:none;">
+                <span class="badge-label">Experiment:</span>
+                <span class="badge-value" id="detail-exp-id"></span>
+                <span class="badge-label">Variant:</span>
+                <span class="badge-value" id="detail-exp-variant"></span>
+            </div>
+            <!-- Parent breadcrumb -->
+            <div id="detail-parent-link" class="session-parent-link" style="display:none;">
+                <span class="parent-icon">&#8593;</span> Parent:
+                <a id="detail-parent-anchor"></a>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Status</div>
+                    <div class="stat-value" id="detail-status">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label" id="detail-cost-label">Total Cost</div>
+                    <div class="stat-value" id="detail-cost">$0.00</div>
+                    <div class="stat-sub" id="detail-cost-sub" style="display:none;font-size:11px;color:#888;margin-top:2px;"></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Tokens</div>
+                    <div class="stat-value" id="detail-tokens">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Prompt Tokens</div>
+                    <div class="stat-value" id="detail-prompt-tokens">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Completion Tokens</div>
+                    <div class="stat-value" id="detail-completion-tokens">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Calls</div>
+                    <div class="stat-value" id="detail-calls">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Cache Hits</div>
+                    <div class="stat-value" id="detail-cache-hits">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Cache Savings</div>
+                    <div class="stat-value" id="detail-cache-savings">$0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">PII Detections</div>
+                    <div class="stat-value" id="detail-pii-detections">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Guardrail Detections</div>
+                    <div class="stat-value" id="detail-guardrail-detections">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Retries</div>
+                    <div class="stat-value" id="detail-retries">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Organization</div>
+                    <div class="stat-value" id="detail-org" style="font-size:13px;">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Team</div>
+                    <div class="stat-value" id="detail-team" style="font-size:13px;">—</div>
+                </div>
+                <div class="stat-card" id="detail-timeout-card" style="display:none;">
+                    <div class="stat-label">Timeout</div>
+                    <div class="stat-value" id="detail-timeout" style="font-size:13px;">—</div>
+                </div>
+            </div>
+            <div id="detail-budget-card" style="display:none;">
+                <div id="detail-budget-session-row" class="stat-card" style="margin-bottom:8px;">
+                    <div class="stat-label">Session Budget</div>
+                    <div class="stat-value" id="detail-budget-text">$0.00 / $0.00</div>
+                    <div class="budget-bar">
+                        <div class="budget-progress" id="detail-budget-progress" style="width:0%"></div>
+                    </div>
+                </div>
+                <div id="detail-budget-team-row" class="stat-card" style="margin-bottom:8px; display:none;">
+                    <div class="stat-label">Team Budget</div>
+                    <div class="stat-value" id="detail-budget-team-text">$0.00 / $0.00</div>
+                    <div class="budget-bar">
+                        <div class="budget-progress" id="detail-budget-team-progress" style="width:0%"></div>
+                    </div>
+                </div>
+                <div id="detail-budget-org-row" class="stat-card" style="margin-bottom:16px; display:none;">
+                    <div class="stat-label">Org Budget</div>
+                    <div class="stat-value" id="detail-budget-org-text">$0.00 / $0.00</div>
+                    <div class="budget-bar">
+                        <div class="budget-progress" id="detail-budget-org-progress" style="width:0%"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="detail-replay-source" class="replay-source-link" style="display:none;"></div>
+            <!-- Child sessions panel -->
+            <div id="detail-children-panel" class="children-panel" style="display:none;">
+                <div class="children-header" onclick="toggleChildrenPanel()">
+                    <h3>Child Sessions <span id="detail-children-count" class="children-count"></span></h3>
+                    <span class="children-toggle" id="children-toggle-icon">&#9662;</span>
+                </div>
+                <div id="detail-children-body" class="children-body">
+                    <!-- Flame graph -->
+                    <div id="flame-graph" class="flame-graph"></div>
+                    <!-- Children list -->
+                    <div id="children-list" class="children-list"></div>
+                </div>
+            </div>
+            <div class="waterfall-header">
+                <h3>Trace Timeline</h3>
+                <div class="waterfall-header-controls">
+                    <label class="page-size-label" for="events-page-size">Page size:</label>
+                    <select id="events-page-size" class="settings-select page-size-select"
+                            onchange="_onPageSizeChange(this.value)">
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="200" selected>200</option>
+                        <option value="500">500</option>
+                    </select>
+                    <div class="waterfall-view-toggle">
+                        <button class="waterfall-toggle-btn active" data-mode="waterfall" onclick="switchWaterfallMode('waterfall')">Waterfall</button>
+                        <button class="waterfall-toggle-btn" data-mode="flat" onclick="switchWaterfallMode('flat')">Flat Events</button>
+                    </div>
+                </div>
+            </div>
+            <div id="waterfall-container" class="waterfall-container">
+                <table class="waterfall-table">
+                    <thead>
+                        <tr>
+                            <th class="wf-col-step">Step</th>
+                            <th class="wf-col-type">Type</th>
+                            <th class="wf-col-model">Model</th>
+                            <th class="wf-col-prompt">Prompt</th>
+                            <th class="wf-col-duration">Duration</th>
+                            <th class="wf-col-cost">Cost</th>
+                            <th class="wf-col-status">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="waterfall-tbody"></tbody>
+                </table>
+            </div>
+            <div id="events-load-more" class="load-more-container" style="display:none;">
+                <button onclick="loadMoreEvents()" class="btn btn-sm load-more-btn">Load More Events</button>
+            </div>
+            <div id="step-timeline" class="step-timeline" style="display:none;"></div>
+            <div id="detail-events" class="event-stream" style="display:none;"></div>
+            <div id="detail-feedback-section"></div>
+        </div>
+
+        <!-- Experiments View -->
+        <div id="view-experiments" class="view">
+            <h2>Experiments</h2>
+            <div class="sub-tabs">
+                <button class="sub-tab active" onclick="switchExpTab('experiments')">Experiments</button>
+                <button class="sub-tab" onclick="switchExpTab('leaderboard')">Leaderboard</button>
+            </div>
+
+            <div id="exp-tab-experiments" class="sub-tab-content active">
+                <table class="data-table" id="experiments-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Strategy</th>
+                            <th>Variants</th>
+                            <th>Assignments</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody id="experiments-tbody"></tbody>
+                </table>
+                <div id="experiment-detail-panel" class="experiment-detail-panel" style="display:none;">
+                    <div class="experiment-detail-header">
+                        <h3 id="exp-detail-name"></h3>
+                        <span id="exp-detail-status" class="status-badge"></span>
+                        <span id="exp-detail-actions" style="margin-left:auto;display:flex;gap:6px;"></span>
+                        <button class="experiment-detail-close" onclick="closeExpDetail()">&times;</button>
+                    </div>
+                    <div id="exp-detail-desc" class="experiment-detail-desc"></div>
+                    <h4 style="margin-bottom:12px;font-size:13px;color:var(--text-secondary);">Variants</h4>
+                    <div id="exp-detail-variants" class="variant-cards"></div>
+                </div>
+            </div>
+
+            <div id="exp-tab-leaderboard" class="sub-tab-content">
+                <table class="data-table" id="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Experiment</th>
+                            <th>Status</th>
+                            <th>Variant</th>
+                            <th>Success Rate</th>
+                            <th>Avg Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboard-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Agents View -->
+        <div id="view-agents" class="view">
+            <h2>Agents</h2>
+            <div class="sub-tabs" id="agents-sub-tabs">
+                <button class="sub-tab active" id="agents-btn-list" onclick="switchAgentTab('list')">All Agents</button>
+                <button class="sub-tab" id="agents-btn-create" onclick="switchAgentTab('create')">Create Agent</button>
+            </div>
+
+            <!-- All Agents Tab -->
+            <div id="agents-tab-list" class="sub-tab-content active">
+                <div class="stats-grid" style="margin-bottom:24px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Total</div>
+                        <div class="stat-value" id="agents-stat-total">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Active</div>
+                        <div class="stat-value" id="agents-stat-active">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Paused</div>
+                        <div class="stat-value" id="agents-stat-paused">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Archived</div>
+                        <div class="stat-value" id="agents-stat-archived">0</div>
+                    </div>
+                </div>
+
+                <table class="data-table" id="agents-table">
+                    <thead>
+                        <tr>
+                            <th>Slug</th>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Model</th>
+                            <th>Team</th>
+                            <th>Version</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agents-tbody"></tbody>
+                </table>
+
+            </div>
+
+            <!-- Create Agent Tab -->
+            <div id="agents-tab-create" class="sub-tab-content">
+                <div class="settings-section">
+                    <h3>Create New Agent</h3>
+                    <div class="settings-row">
+                        <span class="settings-label">Team</span>
+                        <span class="settings-value">
+                            <select class="settings-select" id="agent-form-team" style="width:200px;" onchange="onAgentTeamSelect(this.value)">
+                                <option value="">Select team...</option>
+                            </select>
+                        </span>
+                    </div>
+                    <div id="agent-create-team-form" style="display:none;margin-bottom:16px;padding:16px;background:var(--bg-tertiary);border-radius:var(--radius-sm);border:1px solid var(--border);">
+                        <h4 style="margin:0 0 12px;font-size:13px;color:var(--text-secondary);">Quick Setup: Organization &amp; Team</h4>
+                        <div class="settings-row">
+                            <span class="settings-label">Organization</span>
+                            <span class="settings-value">
+                                <select class="settings-select" id="agent-new-team-org" style="width:200px;" onchange="onNewTeamOrgSelect(this.value)">
+                                    <option value="">Select org...</option>
+                                    <option value="__new__">+ New Organization</option>
+                                </select>
+                            </span>
+                        </div>
+                        <div id="agent-new-org-row" class="settings-row" style="display:none;">
+                            <span class="settings-label">Org Name</span>
+                            <span class="settings-value">
+                                <input type="text" class="settings-input" id="agent-new-org-name" placeholder="My Organization" style="width:200px;">
+                            </span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Team Name</span>
+                            <span class="settings-value">
+                                <input type="text" class="settings-input" id="agent-new-team-name" placeholder="My Team" style="width:200px;">
+                            </span>
+                        </div>
+                        <div style="margin-top:12px;display:flex;gap:8px;">
+                            <button class="btn btn-primary btn-sm" onclick="createTeamForAgent()">Create Team</button>
+                            <button class="btn btn-sm" onclick="hideCreateTeamForm()">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Slug</span>
+                        <span class="settings-value">
+                            <input type="text" class="settings-input" id="agent-form-slug" placeholder="my-agent" style="width:200px;">
+                            <span style="font-size:11px;color:var(--text-secondary);margin-left:8px;">a-z, 0-9, hyphens, 3-64 chars</span>
+                        </span>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Name</span>
+                        <span class="settings-value">
+                            <input type="text" class="settings-input" id="agent-form-name" placeholder="My Agent" style="width:200px;">
+                        </span>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Description</span>
+                        <span class="settings-value">
+                            <textarea class="settings-input" id="agent-form-description" rows="2" style="width:300px;resize:vertical;" placeholder="What this agent does..."></textarea>
+                        </span>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Model</span>
+                        <span class="settings-value">
+                            <select class="settings-select" id="agent-form-model-select" style="width:200px;" onchange="onAgentModelSelect('agent-form')">
+                                <option value="">Select model...</option>
+                            </select>
+                            <input type="text" class="settings-input" id="agent-form-model-custom" placeholder="model name" style="width:200px;display:none;">
+                        </span>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">System Prompt</span>
+                        <span class="settings-value">
+                            <textarea class="settings-input" id="agent-form-system-prompt" rows="6" style="width:300px;resize:vertical;" placeholder="You are a helpful assistant..."></textarea>
+                        </span>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Request Overrides</span>
+                        <span class="settings-value">
+                            <textarea class="settings-input" id="agent-form-request-overrides" rows="2" style="width:300px;resize:vertical;" placeholder='{"temperature": 0.7}'></textarea>
+                        </span>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Budget / Session</span>
+                        <span class="settings-value">
+                            <input type="number" class="settings-input" id="agent-form-budget" min="0" step="0.01" placeholder="optional" style="width:120px;">
+                        </span>
+                    </div>
+                    <div class="settings-save-row">
+                        <button class="btn btn-primary btn-sm" onclick="createAgent()">Create Agent</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Detail View (separate routable page) -->
+        <div id="view-agent-detail" class="view">
+            <div style="margin-bottom:16px;">
+                <a href="#agents" style="color:var(--accent);text-decoration:none;font-size:13px;">&larr; Back to Agents</a>
+            </div>
+            <h2 style="display:flex;align-items:center;gap:12px;">
+                <span id="agent-detail-name"></span>
+                <span id="agent-detail-status" class="status-badge"></span>
+            </h2>
+
+            <div class="event-detail-grid" id="agent-detail-info"></div>
+
+            <div id="agent-detail-proxy-url" style="margin:16px 0;padding:12px;background:var(--bg-tertiary);border-radius:var(--radius-sm);border:1px solid var(--border);">
+                <div class="stat-label" style="margin-bottom:6px;">Proxy URL</div>
+                <code id="agent-proxy-url" style="font-size:12px;word-break:break-all;color:var(--accent);"></code>
+            </div>
+
+            <div id="agent-active-version-section" style="margin-top:16px;">
+                <h4 style="margin-bottom:12px;font-size:13px;color:var(--text-secondary);">Active Version</h4>
+                <div class="event-detail-grid" id="agent-active-version-info"></div>
+                <div id="agent-active-version-prompt" style="display:none;margin-top:12px;">
+                    <div class="stat-label" style="margin-bottom:6px;">System Prompt</div>
+                    <pre id="agent-version-prompt-text" style="background:var(--bg-tertiary);padding:12px;border-radius:var(--radius-sm);font-size:12px;white-space:pre-wrap;max-height:200px;overflow-y:auto;border:1px solid var(--border);"></pre>
+                </div>
+            </div>
+
+            <div id="agent-version-history-section" style="margin-top:16px;">
+                <h4 style="margin-bottom:12px;font-size:13px;color:var(--text-secondary);">Version History</h4>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Version</th>
+                            <th>Model</th>
+                            <th>Created</th>
+                            <th>Created By</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agent-versions-tbody"></tbody>
+                </table>
+            </div>
+
+            <!-- New Version Form (hidden by default) -->
+            <div id="agent-new-version-form" style="display:none;margin-top:16px;padding:16px;background:var(--bg-tertiary);border-radius:var(--radius-sm);border:1px solid var(--border);">
+                <h4 style="margin-bottom:12px;font-size:13px;color:var(--text-secondary);">New Version</h4>
+                <div class="settings-row">
+                    <span class="settings-label">Model</span>
+                    <select class="settings-select" id="new-version-model-select" style="width:200px;" onchange="onAgentModelSelect('new-version')">
+                        <option value="">Select model...</option>
+                    </select>
+                    <input type="text" class="settings-input" id="new-version-model-custom" placeholder="model name" style="width:200px;display:none;">
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">System Prompt</span>
+                    <textarea class="settings-input" id="new-version-system-prompt" rows="4" style="width:300px;resize:vertical;"></textarea>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Request Overrides</span>
+                    <textarea class="settings-input" id="new-version-request-overrides" rows="2" style="width:300px;resize:vertical;" placeholder='{"temperature": 0.7}'></textarea>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Budget / Session</span>
+                    <input type="number" class="settings-input" id="new-version-budget" min="0" step="0.01" placeholder="optional">
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Created By</span>
+                    <input type="text" class="settings-input" id="new-version-created-by" placeholder="your name">
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px;">
+                    <button class="btn btn-primary btn-sm" onclick="submitNewVersion()">Create Version</button>
+                    <button class="btn btn-sm" onclick="hideNewVersionForm()">Cancel</button>
+                </div>
+            </div>
+
+            <div style="margin-top:16px;display:flex;gap:8px;">
+                <button class="btn btn-primary btn-sm" onclick="showNewVersionForm()">New Version</button>
+                <button class="btn btn-sm" id="agent-pause-btn" onclick="toggleAgentPause()">Pause</button>
+                <button class="btn btn-danger btn-sm" id="agent-archive-btn" onclick="archiveCurrentAgent()">Archive</button>
+            </div>
+
+            <!-- Virtual Keys Section -->
+            <div id="agent-vk-section" style="margin-top:24px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                    <h4 style="margin:0;font-size:13px;color:var(--text-secondary);">Virtual Keys</h4>
+                    <button class="btn btn-sm" onclick="createAgentVirtualKey()">+ Create Key</button>
+                </div>
+                <div id="agent-vk-created" style="display:none;margin-bottom:12px;padding:12px;background:var(--bg-tertiary);border-radius:var(--radius-sm);border:1px solid var(--accent);">
+                    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Copy this key now — it won't be shown again:</div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <code id="agent-vk-full-key" style="flex:1;font-size:12px;word-break:break-all;color:var(--accent);"></code>
+                        <button class="btn btn-primary btn-sm" onclick="copyVirtualKey()">Copy</button>
+                    </div>
+                </div>
+                <table class="data-table">
+                    <thead><tr><th>Preview</th><th>Name</th><th>Created</th><th>Actions</th></tr></thead>
+                    <tbody id="agent-vk-tbody"></tbody>
+                </table>
+            </div>
+
+        </div>
+
+        <!-- Consensus View -->
+        <div id="view-consensus" class="view">
+            <h2>Consensus Runs</h2>
+            <div class="stats-grid" style="margin-bottom:24px;">
+                <div class="stat-card">
+                    <div class="stat-label">Total Runs</div>
+                    <div class="stat-value" id="consensus-stat-total">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Confidence</div>
+                    <div class="stat-value" id="consensus-stat-confidence">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Cost</div>
+                    <div class="stat-value" id="consensus-stat-cost">$0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Early Stopped</div>
+                    <div class="stat-value" id="consensus-stat-early">0</div>
+                </div>
+            </div>
+
+            <table class="data-table" id="consensus-table">
+                <thead>
+                    <tr>
+                        <th>Session</th>
+                        <th>Strategy</th>
+                        <th>Models</th>
+                        <th>Rounds</th>
+                        <th>Confidence</th>
+                        <th>Cost</th>
+                        <th>Duration</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody id="consensus-tbody"></tbody>
+            </table>
+
+            <div id="consensus-detail-panel" class="experiment-detail-panel" style="display:none;">
+                <div class="experiment-detail-header">
+                    <h3 id="consensus-detail-title"></h3>
+                    <span id="consensus-detail-strategy" class="status-badge"></span>
+                    <button class="experiment-detail-close" onclick="closeConsensusDetail()">&times;</button>
+                </div>
+                <div class="stats-grid" style="margin:16px 0;">
+                    <div class="stat-card">
+                        <div class="stat-label">Answer Preview</div>
+                        <div class="stat-value" id="consensus-detail-answer" style="font-size:12px;word-break:break-word;"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Winner Model</div>
+                        <div class="stat-value" id="consensus-detail-winner" style="font-size:12px;"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Aggregation</div>
+                        <div class="stat-value" id="consensus-detail-aggregation" style="font-size:12px;"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Early Stopped</div>
+                        <div class="stat-value" id="consensus-detail-early"></div>
+                    </div>
+                </div>
+                <h4 style="margin-bottom:12px;font-size:13px;color:var(--text-secondary);">Rounds</h4>
+                <div id="consensus-detail-rounds"></div>
+                <h4 style="margin:16px 0 12px;font-size:13px;color:var(--text-secondary);">Child Sessions (Debaters)</h4>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Session ID</th>
+                            <th>Name</th>
+                            <th>Cost</th>
+                            <th>Tokens</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="consensus-detail-children"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Safety View -->
+        <!-- Compliance View -->
+        <div id="view-compliance" class="view">
+            <h2>Compliance</h2>
+
+            <div class="sub-tabs">
+                <button class="sub-tab active" onclick="switchComplianceTab('pii')">PII Monitor</button>
+                <button class="sub-tab" onclick="switchComplianceTab('profiles')">Profiles</button>
+                <button class="sub-tab" onclick="switchComplianceTab('audit')">Audit Log</button>
+                <button class="sub-tab" onclick="switchComplianceTab('purge')">Right to Be Forgotten</button>
+                <button class="sub-tab" onclick="switchComplianceTab('orgs')">Organizations</button>
+            </div>
+
+            <!-- PII Monitor Tab -->
+            <div id="compliance-tab-pii" class="sub-tab-content active">
+                <h3>PII Monitor</h3>
+                <div class="stats-grid" style="margin-bottom: 1.5rem;">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Detections</div>
+                        <div class="stat-value" id="pii-total">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Sessions Affected</div>
+                        <div class="stat-value" id="pii-sessions">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Types Detected</div>
+                        <div class="stat-value" id="pii-types-summary">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Actions Taken</div>
+                        <div class="stat-value" id="pii-actions-summary">—</div>
+                    </div>
+                </div>
+                <table id="pii-table" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Session</th>
+                            <th>Type</th>
+                            <th>Detected Value</th>
+                            <th>Action</th>
+                            <th>Field</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pii-tbody">
+                    </tbody>
+                </table>
+
+                <!-- Enterprise PII Rules -->
+                <div class="settings-section" style="margin-top:24px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                        <h3 style="margin:0;">Enterprise PII Rules</h3>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-primary btn-sm" onclick="showAddPIIRuleForm()">Add Rule</button>
+                            <button class="btn btn-danger btn-sm" onclick="clearAllPIIRules()">Clear All</button>
+                        </div>
+                    </div>
+
+                    <div class="stats-grid" style="margin-bottom:16px;">
+                        <div class="stat-card">
+                            <div class="stat-label">PII Enabled</div>
+                            <div class="stat-value">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="pii-enabled-toggle" onchange="togglePIIEnabled(this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Default Mode</div>
+                            <div class="stat-value">
+                                <select class="settings-select" id="pii-default-mode-select" onchange="updatePIIDefaultMode(this.value)">
+                                    <option value="audit">audit</option>
+                                    <option value="redact">redact</option>
+                                    <option value="block">block</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Active Rules</div>
+                            <div class="stat-value" id="pii-rule-count">0</div>
+                        </div>
+                    </div>
+
+                    <div id="pii-add-rule-form" style="display:none;margin-bottom:16px;padding:16px;background:var(--bg-tertiary);border-radius:var(--radius-sm);border:1px solid var(--border);">
+                        <div class="settings-row">
+                            <span class="settings-label">Pattern</span>
+                            <select class="settings-select" id="pii-rule-pattern">
+                                <option value="email">email</option>
+                                <option value="credit_card">credit_card</option>
+                                <option value="ssn">ssn</option>
+                                <option value="phone_us">phone_us</option>
+                                <option value="api_key">api_key</option>
+                                <option value="api_key_openai">api_key_openai</option>
+                                <option value="api_key_anthropic">api_key_anthropic</option>
+                                <option value="api_key_aws">api_key_aws</option>
+                                <option value="api_key_bearer">api_key_bearer</option>
+                                <option value="ip_address">ip_address</option>
+                            </select>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Mode</span>
+                            <select class="settings-select" id="pii-rule-mode">
+                                <option value="audit">audit</option>
+                                <option value="redact">redact</option>
+                                <option value="block">block</option>
+                            </select>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">On Failure</span>
+                            <select class="settings-select" id="pii-rule-on-failure">
+                                <option value="">default</option>
+                                <option value="pass">pass</option>
+                                <option value="block">block</option>
+                            </select>
+                        </div>
+                        <div style="margin-top:12px;display:flex;gap:8px;">
+                            <button class="btn btn-primary btn-sm" onclick="addPIIRule()">Add</button>
+                            <button class="btn btn-sm" onclick="hideAddPIIRuleForm()">Cancel</button>
+                        </div>
+                    </div>
+
+                    <table class="data-table" id="pii-rules-table">
+                        <thead>
+                            <tr>
+                                <th>Pattern</th>
+                                <th>Mode</th>
+                                <th>On Failure</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pii-rules-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Profiles Tab -->
+            <div id="compliance-tab-profiles" class="sub-tab-content">
+                <div id="compliance-profiles-grid" class="stats-grid">
+                    <div class="empty-state">Loading profiles...</div>
+                </div>
+            </div>
+
+            <!-- Audit Log Tab -->
+            <div id="compliance-tab-audit" class="sub-tab-content">
+                <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;">
+                    <select class="settings-select" id="compliance-audit-standard">
+                        <option value="">All Standards</option>
+                        <option value="gdpr">GDPR</option>
+                        <option value="hipaa">HIPAA</option>
+                        <option value="ccpa">CCPA</option>
+                    </select>
+                    <input type="text" class="settings-input" id="compliance-audit-org" placeholder="Org ID (optional)" style="width:160px;">
+                    <button class="btn btn-primary btn-sm" onclick="loadComplianceAudit()">Refresh</button>
+                </div>
+                <table class="data-table" id="compliance-audit-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Standard</th>
+                            <th>Action</th>
+                            <th>Legal Rule</th>
+                            <th>Target</th>
+                            <th>Org ID</th>
+                            <th>Integrity Hash</th>
+                        </tr>
+                    </thead>
+                    <tbody id="compliance-audit-tbody"></tbody>
+                </table>
+            </div>
+
+            <!-- Right to Be Forgotten Tab -->
+            <div id="compliance-tab-purge" class="sub-tab-content">
+                <div class="settings-section">
+                    <h3>Purge User Data</h3>
+                    <div class="settings-row">
+                        <span class="settings-label">User Identifier</span>
+                        <span class="settings-value">
+                            <input type="text" class="settings-input" id="purge-user-id" placeholder="email, name, or ID" style="width:220px;">
+                        </span>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Compliance Standard</span>
+                        <span class="settings-value">
+                            <select class="settings-select" id="purge-standard">
+                                <option value="gdpr">GDPR</option>
+                                <option value="hipaa">HIPAA</option>
+                                <option value="ccpa">CCPA</option>
+                            </select>
+                        </span>
+                    </div>
+                    <div class="settings-save-row">
+                        <button class="btn btn-danger btn-sm" onclick="submitPurge()">Purge Data</button>
+                    </div>
+                </div>
+
+                <div id="purge-results" class="purge-results" style="display:none;">
+                    <h3>Purge Results</h3>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Sessions Deleted</div>
+                            <div class="stat-value" id="purge-sessions-deleted">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Events Deleted</div>
+                            <div class="stat-value" id="purge-events-deleted">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Cache Entries Deleted</div>
+                            <div class="stat-value" id="purge-cache-deleted">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Audit Event ID</div>
+                            <div class="stat-value" id="purge-audit-id" style="font-size:12px;">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Organizations Tab -->
+            <div id="compliance-tab-orgs" class="sub-tab-content">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                    <div class="stats-grid" style="flex:1;margin-bottom:0;">
+                        <div class="stat-card">
+                            <div class="stat-label">Organizations</div>
+                            <div class="stat-value" id="orgs-stat-total">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Teams</div>
+                            <div class="stat-value" id="orgs-stat-teams">0</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-bottom:16px;">
+                    <button class="btn btn-primary btn-sm" onclick="showCreateOrgForm()">Create Organization</button>
+                </div>
+
+                <div id="create-org-form" style="display:none;margin-bottom:16px;padding:16px;background:var(--bg-tertiary);border-radius:var(--radius-sm);border:1px solid var(--border);">
+                    <div class="settings-row">
+                        <span class="settings-label">Name</span>
+                        <input type="text" class="settings-input" id="new-org-name" placeholder="Organization name" style="width:200px;">
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Budget</span>
+                        <input type="number" class="settings-input" id="new-org-budget" min="0" step="0.01" placeholder="optional" style="width:120px;">
+                    </div>
+                    <div style="margin-top:12px;display:flex;gap:8px;">
+                        <button class="btn btn-primary btn-sm" onclick="submitCreateOrg()">Create</button>
+                        <button class="btn btn-sm" onclick="hideCreateOrgForm()">Cancel</button>
+                    </div>
+                </div>
+
+                <div id="compliance-orgs-list">
+                    <div class="empty-state">Loading organizations...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security View -->
+        <div id="view-security" class="view">
+            <h2>Security</h2>
+
+            <div class="sub-tabs">
+                <button class="sub-tab active" onclick="switchSecurityTab('killswitch')">Kill Switch</button>
+                <button class="sub-tab" onclick="switchSecurityTab('blastradius')">Blast Radius</button>
+                <button class="sub-tab" onclick="switchSecurityTab('guardrails')">Guardrails</button>
+                <button class="sub-tab" onclick="switchSecurityTab('audithooks')">Audit Hooks</button>
+                <button class="sub-tab" onclick="switchSecurityTab('vault')">Secret Vault</button>
+                <button class="sub-tab" onclick="switchSecurityTab('events')">Event Log</button>
+            </div>
+
+            <!-- Kill Switch Tab -->
+            <div id="safety-tab-killswitch" class="sub-tab-content active">
+                <div class="stats-grid" style="margin-bottom:24px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Global Kill Switch</div>
+                        <div class="stat-value">
+                            <label class="toggle-switch toggle-switch-danger">
+                                <input type="checkbox" id="ks-global-toggle" onchange="toggleKillSwitch(this.checked)">
+                                <span class="toggle-slider toggle-slider-danger"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Response Mode</div>
+                        <div class="stat-value">
+                            <select class="settings-select" id="ks-response-mode" onchange="updateKSResponseMode(this.value)">
+                                <option value="error">error (raise exception)</option>
+                                <option value="response">response (return static)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Active Rules</div>
+                        <div class="stat-value" id="ks-rule-count">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Environment</div>
+                        <div class="stat-value" id="ks-environment" style="font-size:14px;">—</div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Kill Switch Message</h3>
+                    <div style="display:flex;gap:10px;align-items:center;">
+                        <input type="text" class="settings-input" id="ks-message" style="flex:1;width:auto;" placeholder="Service temporarily unavailable...">
+                        <button class="btn btn-primary btn-sm" onclick="updateKSMessage()">Update</button>
+                        <span class="save-flash" id="flash-ks-message">Updated!</span>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                        <h3 style="margin:0;">Rules</h3>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-primary btn-sm" onclick="showAddRuleForm()">Add Rule</button>
+                            <button class="btn btn-danger btn-sm" onclick="clearAllRules()">Clear All</button>
+                        </div>
+                    </div>
+                    <div id="ks-add-rule-form" style="display:none;margin-bottom:16px;padding:16px;background:var(--bg-tertiary);border-radius:var(--radius-sm);border:1px solid var(--border);">
+                        <div class="settings-row">
+                            <span class="settings-label">Model (glob)</span>
+                            <input type="text" class="settings-input" id="rule-model" placeholder="gpt-4*">
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Provider</span>
+                            <input type="text" class="settings-input" id="rule-provider" placeholder="openai">
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Environment</span>
+                            <input type="text" class="settings-input" id="rule-environment" placeholder="production">
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Agent Version</span>
+                            <input type="text" class="settings-input" id="rule-agent-version" placeholder="v2.1.0">
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Message</span>
+                            <input type="text" class="settings-input" id="rule-message" style="width:200px;" placeholder="Optional override message">
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Reason</span>
+                            <input type="text" class="settings-input" id="rule-reason" style="width:200px;" placeholder="Why this rule exists">
+                        </div>
+                        <div style="margin-top:12px;display:flex;gap:8px;">
+                            <button class="btn btn-primary btn-sm" onclick="addRule()">Add</button>
+                            <button class="btn btn-sm" onclick="hideAddRuleForm()">Cancel</button>
+                        </div>
+                    </div>
+                    <table class="data-table" id="ks-rules-table">
+                        <thead>
+                            <tr>
+                                <th>Model</th>
+                                <th>Provider</th>
+                                <th>Environment</th>
+                                <th>Agent Version</th>
+                                <th>Message</th>
+                                <th>Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ks-rules-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Blast Radius Tab -->
+            <div id="safety-tab-blastradius" class="sub-tab-content">
+                <div class="stats-grid" style="margin-bottom:24px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Enabled</div>
+                        <div class="stat-value" id="br-enabled">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Paused Sessions</div>
+                        <div class="stat-value" id="br-paused-sessions">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Paused Agents</div>
+                        <div class="stat-value" id="br-paused-agents">0</div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Paused Sessions</h3>
+                    <div id="br-sessions-list" class="br-entity-list">
+                        <div class="empty-state" style="padding:16px;">No paused sessions</div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Paused Agents</h3>
+                    <div id="br-agents-list" class="br-entity-list">
+                        <div class="empty-state" style="padding:16px;">No paused agents</div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Failure Counts</h3>
+                    <div class="stats-grid" style="margin-bottom:0;">
+                        <div class="stat-card">
+                            <div class="stat-label">Session Failures</div>
+                            <div id="br-session-failures" style="font-size:12px;font-family:var(--font-mono);color:var(--text-secondary);margin-top:8px;">—</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Agent Failures</div>
+                            <div id="br-agent-failures" style="font-size:12px;font-family:var(--font-mono);color:var(--text-secondary);margin-top:8px;">—</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Recent Events</h3>
+                    <div id="br-events" class="event-stream" style="max-height:300px;">
+                        <div class="empty-state" style="padding:16px;">No blast radius events</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Guardrails Tab -->
+            <div id="security-tab-guardrails" class="sub-tab-content">
+                <div class="stats-grid" style="margin-bottom:16px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Guardrails</div>
+                        <div class="stat-value" id="gr-status">Disabled</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Mode</div>
+                        <div class="stat-value" id="gr-mode">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Detections</div>
+                        <div class="stat-value" id="gr-total">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Blocked</div>
+                        <div class="stat-value" id="gr-blocked">0</div>
+                    </div>
+                </div>
+
+                <div class="stats-grid" style="margin-bottom:24px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Heuristic Patterns</div>
+                        <div class="stat-value" id="gr-heuristic">Disabled</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">NLI Classifier</div>
+                        <div class="stat-value" id="gr-nli" style="font-size:13px;">Disabled</div>
+                        <label class="toggle-switch" style="margin-top:8px;">
+                            <input type="checkbox" id="gr-nli-toggle" onchange="toggleNLI(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Local Model</div>
+                        <div class="stat-value" id="gr-local-model" style="font-size:13px;">Disabled</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Output Scanning</div>
+                        <div class="stat-value" id="gr-output-scan">Disabled</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Pattern Count</div>
+                        <div class="stat-value" id="gr-pattern-count">0</div>
+                    </div>
+                </div>
+
+                <div style="display:flex;gap:24px;margin-bottom:24px;flex-wrap:wrap;">
+                    <div class="settings-section" style="flex:1;min-width:250px;">
+                        <h3>Detections by Category</h3>
+                        <div id="gr-categories" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+                    </div>
+                    <div class="settings-section" style="flex:1;min-width:250px;">
+                        <h3>Detections by Severity</h3>
+                        <div id="gr-severities" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+                    </div>
+                </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 style="margin:0;">Recent Violations</h3>
+                    <button class="btn" onclick="loadGuardrailEvents()">Refresh</button>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Rule</th>
+                            <th>Category</th>
+                            <th>Severity</th>
+                            <th>Phase</th>
+                            <th>Validator</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="gr-events-tbody"></tbody>
+                </table>
+            </div>
+
+            <!-- Audit Hooks Tab -->
+            <div id="security-tab-audithooks" class="sub-tab-content">
+                <div class="stats-grid" style="margin-bottom:24px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Audit Hooks</div>
+                        <div class="stat-value">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="sec-hooks-toggle" onchange="toggleAuditHooks(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Mode</div>
+                        <div class="stat-value">
+                            <select id="sec-hooks-mode" onchange="updateAuditHooksMode(this.value)" style="font-size:14px;padding:4px 8px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);">
+                                <option value="audit">Audit</option>
+                                <option value="enforce">Enforce</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Events Logged</div>
+                        <div class="stat-value" id="sec-event-count">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Blocked</div>
+                        <div class="stat-value" id="sec-blocked-count">0</div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Deny Events</h3>
+                    <p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px;">Operations that trigger audit/block when detected.</p>
+                    <div id="sec-deny-events" style="margin-bottom:8px;"></div>
+                    <div style="display:flex;gap:8px;">
+                        <select id="sec-deny-event-select" style="flex:1;padding:6px 8px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;">
+                            <option value="subprocess.Popen">subprocess.Popen</option>
+                            <option value="os.system">os.system</option>
+                            <option value="socket.connect">socket.connect</option>
+                            <option value="socket.bind">socket.bind</option>
+                            <option value="open">open</option>
+                            <option value="shutil.rmtree">shutil.rmtree</option>
+                            <option value="os.remove">os.remove</option>
+                            <option value="import">import</option>
+                            <option value="compile">compile</option>
+                            <option value="exec">exec</option>
+                            <option value="ctypes.dlopen">ctypes.dlopen</option>
+                        </select>
+                        <button class="btn btn-primary" onclick="addDenyEvent()">Add</button>
+                    </div>
+                </div>
+
+                <div class="settings-section" style="margin-top:16px;">
+                    <h3>Allow Paths</h3>
+                    <p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px;">Glob patterns for file paths that bypass file open checks.</p>
+                    <div id="sec-allow-paths" style="margin-bottom:8px;"></div>
+                    <div style="display:flex;gap:8px;">
+                        <input type="text" id="sec-allow-path-input" placeholder="/usr/lib/**" style="flex:1;padding:6px 8px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;">
+                        <button class="btn btn-primary" onclick="addAllowPath()">Add</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Secret Vault Tab -->
+            <div id="security-tab-vault" class="sub-tab-content">
+                <div class="stats-grid" style="margin-bottom:24px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Vault Status</div>
+                        <div class="stat-value" id="sec-vault-status">Disabled</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Vaulted Keys</div>
+                        <div class="stat-value" id="sec-vault-count">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Scrubbed from Env</div>
+                        <div class="stat-value" id="sec-scrubbed-count">0</div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Vaulted Keys</h3>
+                    <table class="data-table" id="sec-vault-table">
+                        <thead>
+                            <tr>
+                                <th>Key Name</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sec-vault-tbody"></tbody>
+                    </table>
+                </div>
+
+                <div class="settings-section" style="margin-top:16px;">
+                    <h3>Add Secret</h3>
+                    <div style="display:flex;gap:8px;align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px;">Name</label>
+                            <input type="text" id="sec-vault-name" placeholder="MY_SECRET_KEY" style="width:100%;padding:6px 8px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;">
+                        </div>
+                        <div style="flex:1;">
+                            <label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px;">Value</label>
+                            <input type="password" id="sec-vault-value" placeholder="secret value" style="width:100%;padding:6px 8px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;">
+                        </div>
+                        <button class="btn btn-primary" onclick="addVaultSecret()">Store</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Event Log Tab -->
+            <div id="security-tab-events" class="sub-tab-content">
+                <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                    <button class="btn" onclick="loadSecurityEvents()">Refresh</button>
+                </div>
+                <table class="data-table" id="sec-events-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Event</th>
+                            <th>Detail</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sec-events-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Observability View -->
+        <div id="view-observability" class="view">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                <h2 style="margin:0;">Observability</h2>
+                <div class="obs-controls">
+                    <select id="obs-window" class="settings-select" onchange="loadObservability()">
+                        <option value="1h">Last 1 Hour</option>
+                        <option value="6h">Last 6 Hours</option>
+                        <option value="24h">Last 24 Hours</option>
+                        <option value="7d">Last 7 Days</option>
+                    </select>
+                    <span class="obs-auto-refresh" id="obs-auto-refresh">Auto-refresh: 30s</span>
+                </div>
+            </div>
+
+            <!-- Percentile stat cards -->
+            <div class="stats-grid" style="margin-bottom:20px;">
+                <div class="stat-card">
+                    <div class="stat-label">p50 Latency</div>
+                    <div class="stat-value" id="obs-p50">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">p90 Latency</div>
+                    <div class="stat-value" id="obs-p90">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">p95 Latency</div>
+                    <div class="stat-value" id="obs-p95">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">p99 Latency</div>
+                    <div class="stat-value" id="obs-p99">—</div>
+                </div>
+            </div>
+
+            <!-- Chart grid -->
+            <div class="obs-charts-grid">
+                <div class="obs-chart-card">
+                    <h3>Request Rate</h3>
+                    <div class="obs-chart-wrap"><canvas id="obs-chart-request-rate"></canvas></div>
+                </div>
+                <div class="obs-chart-card">
+                    <h3>Latency Distribution</h3>
+                    <div class="obs-chart-wrap"><canvas id="obs-chart-latency"></canvas></div>
+                </div>
+                <div class="obs-chart-card">
+                    <h3>Cost Over Time</h3>
+                    <div class="obs-chart-wrap"><canvas id="obs-chart-cost"></canvas></div>
+                </div>
+                <div class="obs-chart-card">
+                    <h3>Token Usage</h3>
+                    <div class="obs-chart-wrap"><canvas id="obs-chart-tokens"></canvas></div>
+                </div>
+                <div class="obs-chart-card">
+                    <h3>Cache Performance</h3>
+                    <div class="obs-chart-wrap"><canvas id="obs-chart-cache"></canvas></div>
+                </div>
+                <div class="obs-chart-card">
+                    <h3>Provider Breakdown</h3>
+                    <div class="obs-chart-wrap"><canvas id="obs-chart-provider"></canvas></div>
+                </div>
+                <div class="obs-chart-card wide">
+                    <h3>Top Models</h3>
+                    <div class="obs-chart-wrap"><canvas id="obs-chart-top-models"></canvas></div>
+                </div>
+            </div>
+
+            <div class="obs-prometheus-status" id="obs-prometheus-status"></div>
+        </div>
+
+        <!-- Settings View -->
+        <div id="view-settings" class="view">
+            <h2>Settings</h2>
+
+            <div class="settings-section">
+                <h3>Budget</h3>
+                <div class="settings-row">
+                    <span class="settings-label">Per-Session Budget</span>
+                    <span class="settings-value">
+                        <input type="number" class="settings-input" id="settings-budget-session" min="0" step="0.01" placeholder="unlimited">
+                    </span>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Global Budget</span>
+                    <span class="settings-value">
+                        <input type="number" class="settings-input" id="settings-budget-global" min="0" step="0.01" placeholder="unlimited">
+                    </span>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Budget Action</span>
+                    <span class="settings-value">
+                        <select class="settings-select" id="settings-budget-action">
+                            <option value="hard_stop">hard_stop</option>
+                            <option value="warn">warn</option>
+                        </select>
+                    </span>
+                </div>
+                <div class="settings-save-row">
+                    <button class="btn btn-primary btn-sm" onclick="saveSettings('budget')">Save</button>
+                    <span class="save-flash" id="flash-budget">Saved!</span>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Cache</h3>
+                <div class="settings-row">
+                    <span class="settings-label">Enabled <span class="restart-badge">restart required</span></span>
+                    <span class="settings-value"><span class="readonly-value" id="settings-cache-enabled">-</span></span>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Max Size</span>
+                    <span class="settings-value">
+                        <input type="number" class="settings-input" id="settings-cache-max-size" min="1" step="1">
+                    </span>
+                </div>
+                <div class="settings-save-row">
+                    <button class="btn btn-primary btn-sm" onclick="saveSettings('cache')">Save</button>
+                    <span class="save-flash" id="flash-cache">Saved!</span>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Loop Detection</h3>
+                <div class="settings-row">
+                    <span class="settings-label">Exact Threshold</span>
+                    <span class="settings-value">
+                        <input type="number" class="settings-input" id="settings-loop-threshold" min="1" step="1">
+                    </span>
+                </div>
+                <div class="settings-save-row">
+                    <button class="btn btn-primary btn-sm" onclick="saveSettings('loop')">Save</button>
+                    <span class="save-flash" id="flash-loop">Saved!</span>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Storage</h3>
+                <div class="settings-row">
+                    <span class="settings-label">Retention Days</span>
+                    <span class="settings-value">
+                        <input type="number" class="settings-input" id="settings-retention-days" min="1" step="1">
+                    </span>
+                </div>
+                <div class="settings-save-row">
+                    <button class="btn btn-primary btn-sm" onclick="saveSettings('storage')">Save</button>
+                    <span class="save-flash" id="flash-storage">Saved!</span>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Console</h3>
+                <div class="settings-row">
+                    <span class="settings-label">Output <span class="restart-badge">restart required</span></span>
+                    <span class="settings-value"><span class="readonly-value" id="settings-console-output">-</span></span>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Verbose</span>
+                    <span class="settings-value">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settings-console-verbose">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </span>
+                </div>
+                <div class="settings-save-row">
+                    <button class="btn btn-primary btn-sm" onclick="saveSettings('console')">Save</button>
+                    <span class="save-flash" id="flash-console">Saved!</span>
+                </div>
+            </div>
+        </div>
+        <!-- Server Logs View (debug mode only) -->
+        <div id="view-server-logs" class="view">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                <h2 style="margin:0;">Server Logs</h2>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <select class="settings-select" id="logs-level-filter">
+                        <option value="">All Levels</option>
+                        <option value="DEBUG">DEBUG</option>
+                        <option value="INFO">INFO</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option>
+                        <option value="CRITICAL">CRITICAL</option>
+                    </select>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
+                        <input type="checkbox" id="logs-auto-scroll" checked> Auto-scroll
+                    </label>
+                    <button class="btn btn-sm" onclick="clearServerLogs()">Clear</button>
+                    <button class="btn btn-sm" onclick="loadServerLogs()">Refresh</button>
+                </div>
+            </div>
+            <div id="server-logs-container" class="server-logs-container">
+                <div class="empty-state">No logs captured yet.</div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/app.js?v=33"></script>
+</body>
+</html>
