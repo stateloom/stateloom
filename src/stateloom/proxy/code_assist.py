@@ -455,6 +455,35 @@ async def _handle_passthrough(
                     ctx.skip_call = False
                     ctx.cached_response = None
 
+                # Check if PII Phase 1 stripped the active turn (user's
+                # current message contained previously-blocked PII).
+                # Return a visible content-policy response as SSE so the
+                # CLI renders it — don't forward a request with the user's
+                # input silently missing.
+                if session.metadata.get("_pii_active_turn_stripped"):
+                    return _emit_cached_as_stream(
+                        _make_content_policy_response(
+                            "[Content Policy] Your message was removed because it "
+                            "contained previously blocked sensitive information. "
+                            "Please rephrase without including PII.",
+                            model,
+                        )
+                    )
+
+                # Check if middleware stripped all non-system messages
+                remaining = [
+                    m for m in ctx.request_kwargs.get("messages", [])
+                    if m.get("role") != "system"
+                ]
+                if not remaining:
+                    return _emit_cached_as_stream(
+                        _make_content_policy_response(
+                            "[Content Policy] All messages were removed by "
+                            "content policy. Please start a new conversation.",
+                            model,
+                        )
+                    )
+
                 # Rebuild body if middleware modified messages (e.g. PII stripping)
                 forwarded_body = raw_body
                 current_messages = ctx.request_kwargs.get("messages", [])
@@ -472,6 +501,35 @@ async def _handle_passthrough(
                 )
 
             else:
+
+                # Check if PII Phase 1 stripped the active turn
+                if session.metadata.get("_pii_active_turn_stripped"):
+                    return JSONResponse(
+                        status_code=400,
+                        content=_code_assist_error(
+                            400,
+                            "[Content Policy] Your message was removed because "
+                            "it contained previously blocked sensitive "
+                            "information. Please rephrase without including PII.",
+                            "INVALID_ARGUMENT",
+                        ),
+                    )
+
+                # Check if middleware stripped all non-system messages
+                remaining_ns = [
+                    m for m in ctx.request_kwargs.get("messages", [])
+                    if m.get("role") != "system"
+                ]
+                if not remaining_ns:
+                    return JSONResponse(
+                        status_code=400,
+                        content=_code_assist_error(
+                            400,
+                            "All messages were removed by content policy. "
+                            "Please start a new conversation.",
+                            "INVALID_ARGUMENT",
+                        ),
+                    )
 
                 async def llm_call() -> dict[str, Any]:
                     # Rebuild body if middleware modified messages (e.g. PII stripping)
@@ -507,6 +565,21 @@ async def _handle_passthrough(
                 return JSONResponse(content={"response": str(result)})
 
     except Exception as exc:
+        from stateloom.core.errors import StateLoomPIIBlockedError
+
+        if isinstance(exc, StateLoomPIIBlockedError) and stream:
+            # Return PII block as a synthetic SSE response so Gemini CLI
+            # renders the error text visibly. A plain JSON 400 on a streaming
+            # request is silently swallowed by CLIs.
+            error_text = (
+                f"[Content Policy] Your message was blocked: "
+                f"detected {exc.pii_type}. "
+                f"Please remove sensitive information and try again."
+            )
+            return _emit_cached_as_stream(
+                _make_content_policy_response(error_text, model)
+            )
+
         status, content = _map_error(exc)
         return JSONResponse(status_code=status, content=content)
     finally:
@@ -614,6 +687,30 @@ def _emit_cached_as_stream(result: dict[str, Any]) -> StreamingResponse:
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
+
+
+def _make_content_policy_response(text: str, model: str) -> dict[str, Any]:
+    """Build a synthetic Code Assist response with content-policy text.
+
+    Uses the Code Assist SSE format (``{"response": {...}}``) so the
+    Gemini CLI renders the text visibly to the user.
+    """
+    return {
+        "response": {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": text}], "role": "model"},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 0,
+                "candidatesTokenCount": 0,
+                "totalTokenCount": 0,
+            },
+            "modelVersion": model,
+        }
+    }
 
 
 def _patch_code_assist_body(

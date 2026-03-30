@@ -44,6 +44,9 @@ htmlcov/
 .claude/
 CLAUDE.md
 
+# Internal notes
+TODO.md
+
 # Archive (internal docs, demos, loose scripts)
 _archive/
 

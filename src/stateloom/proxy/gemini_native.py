@@ -384,13 +384,28 @@ async def _handle_passthrough(
                 session.end_user = end_user
             session.next_step()
 
+            # Detect CLI internal overhead calls (e.g. Gemini CLI quota/
+            # count checks using a lightweight flash model with a single
+            # user message).  All calls in this handler are proxy-originated,
+            # so no session-name guard is needed.
+            request_kwargs: dict[str, Any] = {
+                "messages": openai_messages,
+                "model": model,
+            }
+            if "flash" in model:
+                non_system = [
+                    m for m in openai_messages if m.get("role") != "system"
+                ]
+                if len(non_system) == 1 and non_system[0].get("role") == "user":
+                    request_kwargs["_cli_internal"] = True
+
             ctx = MiddlewareContext(
                 session=session,
                 config=gate.config,
                 provider="gemini",
                 model=model,
                 method="generateContent",
-                request_kwargs={"messages": openai_messages, "model": model},
+                request_kwargs=request_kwargs,
                 request_hash="" if stream else gate.pipeline._hash_request(
                     {"messages": openai_messages, "model": model}
                 ),

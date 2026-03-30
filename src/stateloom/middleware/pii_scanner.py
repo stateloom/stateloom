@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from stateloom.core.config import PIIRule, StateLoomConfig
 from stateloom.core.errors import StateLoomPIIBlockedError
 from stateloom.core.event import PIIDetectionEvent
-from stateloom.core.types import FailureAction, PIIMode
+from stateloom.core.types import ActionTaken, FailureAction, PIIMode
 from stateloom.middleware.base import MiddlewareContext
 from stateloom.pii.rehydrator import PIIRehydrator
 from stateloom.pii.scanner import PIIMatch, PIIScanner
@@ -22,6 +22,13 @@ if TYPE_CHECKING:
     from stateloom.pii.stream_buffer import StreamPIIBuffer
 
 logger = logging.getLogger("stateloom.middleware.pii")
+
+# Map PIIMode → ActionTaken so event.action_taken is always the canonical enum value.
+_MODE_TO_ACTION: dict[PIIMode, ActionTaken] = {
+    PIIMode.AUDIT: ActionTaken.LOGGED,
+    PIIMode.REDACT: ActionTaken.REDACTED,
+    PIIMode.BLOCK: ActionTaken.BLOCKED,
+}
 
 # Store key for persisted PII config state
 _STORE_KEY_PII_CONFIG = "pii_config_json"
@@ -335,6 +342,10 @@ class PIIScannerMiddleware:
                 # so the request proceeds without the PII-contaminated text.
                 # Unlike re-blocking (which raises an error the CLI retries
                 # forever), stripping lets the pipeline continue.
+                #
+                # We set a flag so the proxy handler can return a visible
+                # content-policy response instead of forwarding a request
+                # with the user's input missing.
                 logger.info(
                     "[PII] Phase 1: stripping active turn msg[%d] "
                     "containing %d previously-blocked PII value(s)",
@@ -342,6 +353,7 @@ class PIIScannerMiddleware:
                     len(blocked_in_msg),
                 )
                 strip_indices.add(i)
+                session.metadata["_pii_active_turn_stripped"] = True
             else:
                 # History message — strip the entire message.
                 strip_indices.add(i)
@@ -373,6 +385,10 @@ class PIIScannerMiddleware:
 
         messages = ctx.request_kwargs.get("messages", [])
         system = ctx.request_kwargs.get("system", "")
+
+        # Clear per-call flag before Phase 1 (prevents stale flag from
+        # a previous call in the same session).
+        ctx.session.metadata.pop("_pii_active_turn_stripped", None)
 
         # ── Phase 1: strip messages containing previously-blocked PII ──
         strip_indices, strip_system = self._strip_known_blocked_pii(
@@ -476,7 +492,7 @@ class PIIScannerMiddleware:
                                 pii_type=match.pattern_name,
                                 mode=mode.value,
                                 pii_field=match.field,
-                                action_taken=mode.value,
+                                action_taken=_MODE_TO_ACTION[mode],
                                 metadata={
                                     "redacted_preview": _mask_pii_text(
                                         match.matched_text,
@@ -507,7 +523,7 @@ class PIIScannerMiddleware:
                             pii_type=match.pattern_name,
                             mode=mode.value,
                             pii_field=match.field,
-                            action_taken=mode.value,
+                            action_taken=_MODE_TO_ACTION[mode],
                             metadata={
                                 "redacted_preview": _mask_pii_text(
                                     match.matched_text,
@@ -541,7 +557,7 @@ class PIIScannerMiddleware:
                             pii_type=match.pattern_name,
                             mode=mode.value,
                             pii_field=match.field,
-                            action_taken=mode.value,
+                            action_taken=_MODE_TO_ACTION[mode],
                             metadata={
                                 "redacted_preview": _mask_pii_text(
                                     match.matched_text,
@@ -562,7 +578,7 @@ class PIIScannerMiddleware:
                             pii_type=match.pattern_name,
                             mode=mode.value,
                             pii_field=match.field,
-                            action_taken=mode.value,
+                            action_taken=_MODE_TO_ACTION[mode],
                             metadata={
                                 "redacted_preview": _mask_pii_text(
                                     match.matched_text,
@@ -591,7 +607,7 @@ class PIIScannerMiddleware:
                             pii_type=match.pattern_name,
                             mode=mode.value,
                             pii_field=match.field,
-                            action_taken=mode.value,
+                            action_taken=_MODE_TO_ACTION[mode],
                             metadata={
                                 "redacted_preview": _mask_pii_text(
                                     match.matched_text,
@@ -612,7 +628,7 @@ class PIIScannerMiddleware:
                             pii_type=match.pattern_name,
                             mode=mode.value,
                             pii_field=match.field,
-                            action_taken=mode.value,
+                            action_taken=_MODE_TO_ACTION[mode],
                             metadata={
                                 "redacted_preview": _mask_pii_text(
                                     match.matched_text,
@@ -631,7 +647,7 @@ class PIIScannerMiddleware:
                         pii_type=match.pattern_name,
                         mode=mode.value,
                         pii_field=match.field,
-                        action_taken=mode.value,
+                        action_taken=_MODE_TO_ACTION[mode],
                         metadata={
                             "redacted_preview": _mask_pii_text(
                                 match.matched_text,
@@ -686,7 +702,7 @@ class PIIScannerMiddleware:
             # are suppressed.  Re-blocks during cooldown never create
             # events, so they never reach here — no lockout risk.
             has_new_blocks = any(
-                isinstance(e, PIIDetectionEvent) and e.action_taken == "block" for e in ctx.events
+                isinstance(e, PIIDetectionEvent) and e.action_taken == ActionTaken.BLOCKED for e in ctx.events
             )
             if has_new_blocks:
                 ctx.session.metadata["_pii_last_block_ts"] = time.time()

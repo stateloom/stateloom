@@ -173,17 +173,6 @@ class CostTracker:
             # user_prompt_id="session-summary-generation")
             if ctx.request_kwargs.get("_cli_internal"):
                 is_cli_internal = True
-            # Heuristic fallback: CLI internal requests (quota check, token
-            # count) have exactly one message (user-only, no system prompt).
-            # Real user turns always include a system message. Only flag on
-            # sticky sessions (proxy/CLI-originated) to avoid false positives
-            # on SDK calls where a single user message is legitimate.
-            elif (
-                len(messages) == 1
-                and messages[0].get("role") == "user"
-                and ctx.session.id.startswith("sticky-")
-            ):
-                is_cli_internal = True
 
         # Detect tool-use continuations (responses to tool results)
         is_tool_continuation = (

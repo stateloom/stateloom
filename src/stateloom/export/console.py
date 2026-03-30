@@ -20,6 +20,7 @@ from stateloom.core.event import (
     LoopDetectionEvent,
     PIIDetectionEvent,
 )
+from stateloom.core.types import ActionTaken
 from stateloom.middleware.base import MiddlewareContext
 
 logger = logging.getLogger("stateloom.export.console")
@@ -94,7 +95,7 @@ class ConsoleOutput:
     def _print_pii(self, event: PIIDetectionEvent) -> None:
         line = Text()
         line.append("[StateLoom] ", style="bold cyan")
-        if event.action_taken == "blocked":
+        if event.action_taken == ActionTaken.BLOCKED:
             line.append("  PII BLOCKED ", style="bold red")
         else:
             line.append("  PII DETECTED ", style="bold yellow")

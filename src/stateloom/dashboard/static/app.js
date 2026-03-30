@@ -390,17 +390,10 @@ async function loadSessionDetail(sessionId) {
         detailTeamEl.innerHTML = '<span class="text-muted">\u2014</span>';
     }
 
-    // Duration
+    // Duration — removed (session started_at/ended_at don't reflect true
+    // wall-clock span for proxy sessions like Gemini CLI)
     const durationEl = document.getElementById('detail-duration');
-    if (session.ended_at) {
-        const ms = new Date(session.ended_at) - new Date(session.started_at);
-        durationEl.textContent = ` (${formatDuration(ms)})`;
-    } else if (session.status === 'active') {
-        const ms = Date.now() - new Date(session.started_at);
-        durationEl.textContent = ` (${formatDuration(ms)} running)`;
-    } else {
-        durationEl.textContent = '';
-    }
+    durationEl.textContent = '';
 
     // Experiment badge
     const expBadge = document.getElementById('detail-experiment-badge');
@@ -938,8 +931,8 @@ async function loadPII() {
     data.detections.forEach(d => {
         const tr = document.createElement('tr');
         // Color-code action
-        const actionClass = d.action === 'block' ? 'pii-action-block'
-            : d.action === 'redact' ? 'pii-action-redact' : 'pii-action-audit';
+        const actionClass = d.action === 'blocked' ? 'pii-action-blocked'
+            : d.action === 'redacted' ? 'pii-action-redacted' : 'pii-action-logged';
         const preview = d.redacted_preview
             ? `<code class="pii-preview">${escapeHtml(d.redacted_preview)}</code>`
             : `<span class="dim">[${d.match_length || '?'} chars]</span>`;
@@ -1457,6 +1450,10 @@ function groupEventsIntoSteps(events) {
 
 function getWaterfallTypeBadge(event) {
     const type = event.event_type;
+    // Tool-continuation LLM calls render as [Tool] not [LLM]
+    if (type === 'llm_call' && event.is_tool_continuation) {
+        return `<span class="wf-type-badge wf-type-tool-summary">Tool</span>`;
+    }
     const classMap = {
         'llm_call': 'wf-type-llm',
         'cache_hit': 'wf-type-cache',
@@ -1499,7 +1496,8 @@ function getWaterfallTypeBadge(event) {
 
 function getDurationBarClass(event) {
     const type = event.event_type;
-    if (type === 'llm_call') return 'wf-bar-llm';
+    if (type === 'llm_call') return event.is_tool_continuation ? 'wf-bar-tool' : 'wf-bar-llm';
+    if (type === 'tool_call') return 'wf-bar-tool';
     if (type === 'cache_hit') return 'wf-bar-cache';
     if (type === 'local_routing') return event.routing_success ? 'wf-bar-local' : 'wf-bar-llm';
     if (type === 'shadow_draft') return 'wf-bar-shadow';
@@ -1737,7 +1735,18 @@ function _groupByPromptId(steps) {
             parentIndex[pid] = result.length;
             result.push(step);
         } else {
-            // Subsequent step with same prompt ID — merge into parent
+            // Subsequent step with same prompt ID — only merge if it's
+            // actually a tool step. Regular LLM calls sharing the same
+            // prompt ID (e.g. Gemini CLI flash-lite + flash-preview for
+            // the same user turn) should stay as separate steps.
+            const p = step.primary;
+            const isToolStep = (p.is_tool_continuation) ||
+                               (p.event_type === 'tool_call');
+            if (!isToolStep) {
+                result.push(step);
+                continue;
+            }
+
             const parent = result[parentIndex[pid]];
 
             // Accumulate this step (and its tool children) into the parent's
@@ -1758,10 +1767,10 @@ function _groupByPromptId(steps) {
             const childSteps = [step].concat(step.collapsed_steps || []);
             let addTokens = 0, addCost = 0, addLatency = 0, addCount = 0;
             for (const cs of childSteps) {
-                const p = cs.primary || cs;
-                addTokens += (p.prompt_tokens || 0) + (p.completion_tokens || 0);
-                addCost += p.cost || 0;
-                addLatency += p.latency_ms || 0;
+                const cp = cs.primary || cs;
+                addTokens += (cp.prompt_tokens || 0) + (cp.completion_tokens || 0);
+                addCost += cp.cost || 0;
+                addLatency += cp.latency_ms || 0;
                 addCount++;
             }
 
@@ -1823,7 +1832,14 @@ function _renderToolChildRows(tbody, childSteps, toolRowId, maxLatency, insertAf
         const isLast = csIdx === childSteps.length - 1;
         const connector = isLast ? '\u2514\u2500' : '\u251C\u2500';
         const csBarClass = getDurationBarClass(csPrimary);
-        const csPreview = csPrimary.prompt_preview || '';
+        // For tool children: show tool_name (ToolCallEvent) or prompt_preview
+        // (tool-continuation LLMCallEvent which has tool names extracted)
+        const isToolCont = csPrimary.event_type === 'llm_call' && csPrimary.is_tool_continuation;
+        const isToolCall = csPrimary.event_type === 'tool_call';
+        const toolLabel = csPrimary.tool_name || csPrimary.prompt_preview || '';
+        const toolSecondary = (isToolCont || isToolCall)
+            ? (csPrimary.model || '')
+            : '';
 
         const csTr = document.createElement('tr');
         csTr.className = 'wf-row-tool-child';
@@ -1831,8 +1847,8 @@ function _renderToolChildRows(tbody, childSteps, toolRowId, maxLatency, insertAf
         csTr.innerHTML =
             `<td><span class="wf-tree-connector">${connector}</span></td>` +
             `<td>${getWaterfallTypeBadge(csPrimary)}</td>` +
-            `<td style="color:var(--text-secondary);font-size:11px;">${escapeHtml(String(csPrimary.model || '\u2014'))}</td>` +
-            `<td style="color:var(--text-secondary);font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(csPreview)}">${escapeHtml(csPreview)}</td>` +
+            `<td style="color:var(--text-primary);font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(toolLabel)}">${escapeHtml(toolLabel || '\u2014')}</td>` +
+            `<td style="color:var(--text-secondary);font-size:11px;">${escapeHtml(toolSecondary)}</td>` +
             `<td>${createDurationBarHtml(csPrimary.latency_ms, maxLatency, csBarClass)}</td>` +
             `<td style="font-size:11px;">${formatWaterfallCost(csPrimary)}</td>` +
             `<td>${getWaterfallStatus(csPrimary)}</td>`;

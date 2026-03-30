@@ -42,8 +42,13 @@ class PrecomputeMiddleware:
     result instead of computing inline.
     """
 
-    def __init__(self, semantic_classifier: Any) -> None:
+    def __init__(
+        self,
+        semantic_classifier: Any,
+        compliance_fn: Any = None,
+    ) -> None:
         self._classifier = semantic_classifier
+        self._compliance_fn = compliance_fn
 
     async def process(
         self,
@@ -52,6 +57,24 @@ class PrecomputeMiddleware:
     ) -> Any:
         if self._classifier is None:
             return await call_next(ctx)
+
+        # Skip for CLI internal overhead calls — no point scoring
+        # complexity for haiku/flash quota checks.
+        if ctx.request_kwargs.get("_cli_internal"):
+            return await call_next(ctx)
+
+        # Skip when compliance profile blocks local routing — the
+        # AutoRouter will bail out anyway, so don't waste a background
+        # thread loading the CrossEncoder model.
+        if self._compliance_fn:
+            try:
+                profile = self._compliance_fn(
+                    ctx.session.org_id, ctx.session.team_id
+                )
+                if profile and profile.block_local_routing:
+                    return await call_next(ctx)
+            except Exception:
+                logger.debug("Compliance check in precompute failed", exc_info=True)
 
         last_text = _extract_last_user_text(ctx.request_kwargs)
         if not last_text:

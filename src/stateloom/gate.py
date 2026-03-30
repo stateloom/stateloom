@@ -536,7 +536,10 @@ class Gate:
                     model_name=self.config.auto_route.semantic_model,
                 )
                 self._shared_semantic_classifier = shared_classifier
-                self.pipeline.add(PrecomputeMiddleware(shared_classifier))
+                self.pipeline.add(PrecomputeMiddleware(
+                    shared_classifier,
+                    compliance_fn=self._get_compliance_profile,
+                ))
             except Exception:
                 logger.debug("PrecomputeMiddleware init failed", exc_info=True)
 

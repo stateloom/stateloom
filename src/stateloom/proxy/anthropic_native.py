@@ -83,6 +83,14 @@ def _is_cli_preflight(body: dict[str, Any], request: Any) -> bool:
     content = messages[0].get("content", "")
     if isinstance(content, str) and len(content.strip()) <= 30:
         return True
+    # Claude CLI also sends content as list of blocks: [{"type": "text", "text": "..."}]
+    if isinstance(content, list):
+        text = ""
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text += block.get("text", "")
+        if len(text.strip()) <= 30:
+            return True
     return False
 
 
@@ -389,13 +397,28 @@ async def _handle_passthrough(
                 session.end_user = end_user
             session.next_step()
 
+            # Detect CLI internal overhead calls (e.g. haiku quota/token
+            # counts with longer prompts that weren't caught by
+            # _is_cli_preflight).  All calls in this handler are proxy-
+            # originated, so no session-name guard is needed.
+            request_kwargs: dict[str, Any] = {
+                "messages": openai_messages,
+                "model": model,
+            }
+            if "haiku" in model:
+                non_system = [
+                    m for m in openai_messages if m.get("role") != "system"
+                ]
+                if len(non_system) == 1 and non_system[0].get("role") == "user":
+                    request_kwargs["_cli_internal"] = True
+
             ctx = MiddlewareContext(
                 session=session,
                 config=gate.config,
                 provider="anthropic",
                 model=model,
                 method="messages.create",
-                request_kwargs={"messages": openai_messages, "model": model},
+                request_kwargs=request_kwargs,
                 request_hash="" if stream else gate.pipeline._hash_request(
                     {"messages": openai_messages, "model": model}
                 ),
@@ -420,18 +443,27 @@ async def _handle_passthrough(
                         ctx.skip_call = False
                         ctx.cached_response = None
 
-                # Check if middleware stripped all messages (e.g. PII Phase 1
-                # removed all messages containing previously-blocked PII).
-                # Don't forward an empty request to upstream.
-                remaining = [
-                    m for m in ctx.request_kwargs.get("messages", []) if m.get("role") != "system"
-                ]
-                if not remaining:
-                    # Return as synthetic SSE so CLI renders the message
+                # Check if PII Phase 1 stripped the active turn (user's
+                # current message contained previously-blocked PII).
+                # Return a visible content-policy response as SSE so the
+                # CLI renders it instead of re-answering old context.
+                if session.metadata.get("_pii_active_turn_stripped"):
                     msg = _make_anthropic_message(
                         "[Content Policy] Your message was removed because it "
                         "contained previously blocked sensitive information. "
                         "Please rephrase without including PII.",
+                        model,
+                    )
+                    return _emit_cached_as_stream(msg, None)
+
+                # Check if middleware stripped all messages
+                remaining = [
+                    m for m in ctx.request_kwargs.get("messages", []) if m.get("role") != "system"
+                ]
+                if not remaining:
+                    msg = _make_anthropic_message(
+                        "[Content Policy] All messages were removed by "
+                        "content policy. Please start a new conversation.",
                         model,
                     )
                     return _emit_cached_as_stream(msg, None)
@@ -451,7 +483,18 @@ async def _handle_passthrough(
                 )
 
             else:
-                # Non-streaming: check for empty messages after middleware
+                # Non-streaming: check for active turn stripped by PII Phase 1
+                if session.metadata.get("_pii_active_turn_stripped"):
+                    return JSONResponse(
+                        status_code=400,
+                        content=_anthropic_error(
+                            "invalid_request_error",
+                            "[Content Policy] Your message was removed because "
+                            "it contained previously blocked sensitive "
+                            "information. Please rephrase without including PII.",
+                        ),
+                    )
+
                 remaining_ns = [
                     m for m in ctx.request_kwargs.get("messages", []) if m.get("role") != "system"
                 ]

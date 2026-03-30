@@ -59,6 +59,14 @@ class PIIMode(str, Enum):
     BLOCK = "block"
 
 
+class ActionTaken(str, Enum):
+    """Standardised action_taken values for PII, guardrail, and security events."""
+
+    LOGGED = "logged"
+    REDACTED = "redacted"
+    BLOCKED = "blocked"
+
+
 class BudgetAction(str, Enum):
     WARN = "warn"
     HARD_STOP = "hard_stop"

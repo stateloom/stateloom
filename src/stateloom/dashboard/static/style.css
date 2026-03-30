@@ -426,17 +426,17 @@ h3 {
     letter-spacing: 0.3px;
 }
 
-.pii-action-block {
+.pii-action-blocked {
     background: rgba(248, 113, 113, 0.15);
     color: #f87171;
 }
 
-.pii-action-redact {
+.pii-action-redacted {
     background: rgba(250, 204, 21, 0.15);
     color: #facc15;
 }
 
-.pii-action-audit, .pii-action-logged {
+.pii-action-logged {
     background: rgba(96, 165, 250, 0.15);
     color: #60a5fa;
 }
@@ -1972,6 +1972,7 @@ h3 {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
+    margin-bottom: 16px;
 }
 
 .session-detail-header h2 {
@@ -2252,6 +2253,7 @@ h3 {
 .wf-bar-llm { background: linear-gradient(90deg, rgba(88, 166, 255, 0.6), rgba(88, 166, 255, 0.3)); }
 .wf-bar-cache { background: linear-gradient(90deg, rgba(34, 211, 168, 0.6), rgba(34, 211, 168, 0.3)); }
 .wf-bar-local { background: linear-gradient(90deg, rgba(34, 211, 238, 0.6), rgba(34, 211, 238, 0.3)); }
+.wf-bar-tool { background: linear-gradient(90deg, rgba(139, 92, 246, 0.6), rgba(139, 92, 246, 0.3)); }
 .wf-bar-shadow { background: linear-gradient(90deg, rgba(183, 148, 246, 0.6), rgba(183, 148, 246, 0.3)); }
 .wf-bar-retry { background: linear-gradient(90deg, rgba(245, 101, 101, 0.6), rgba(245, 101, 101, 0.3)); }
 .wf-bar-pii { background: linear-gradient(90deg, rgba(240, 180, 41, 0.6), rgba(240, 180, 41, 0.3)); }

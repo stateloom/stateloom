@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from fnmatch import fnmatch
 from typing import Any
 
+from stateloom.core.types import ActionTaken
+
 logger = logging.getLogger("stateloom.security")
 
 _AUDIT_BUFFER_MAXLEN = 100
@@ -111,7 +113,7 @@ class AuditHookManager:
             "high" if event in ("subprocess.Popen", "os.system", "ctypes.dlopen") else "medium"
         )
         blocked = self._mode == "enforce"
-        action = "blocked" if blocked else "logged"
+        action = ActionTaken.BLOCKED if blocked else ActionTaken.LOGGED
 
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -70,7 +70,7 @@ def test_pii_redact_email(e2e_gate, api_client):
     assert result is response
     pii_resp = client.get("/pii").json()
     assert pii_resp["total"] >= 1
-    assert pii_resp["by_action"].get("redact", 0) >= 1
+    assert pii_resp["by_action"].get("redacted", 0) >= 1
 
 
 def test_pii_audit_only(e2e_gate, api_client):
@@ -94,7 +94,7 @@ def test_pii_audit_only(e2e_gate, api_client):
     assert result is response
     pii_resp = client.get("/pii").json()
     assert pii_resp["total"] >= 1
-    assert pii_resp["by_action"].get("audit", 0) >= 1
+    assert pii_resp["by_action"].get("logged", 0) >= 1
 
 
 def test_pii_credit_card_detection(e2e_gate, api_client):

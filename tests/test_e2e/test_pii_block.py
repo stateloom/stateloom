@@ -51,9 +51,9 @@ def test_pii_block_events_persisted(e2e_gate, api_client):
     detections = pii_resp["detections"]
     email_detections = [d for d in detections if d["pii_type"] == "email"]
     assert len(email_detections) >= 1
-    assert email_detections[0]["action"] == "block"
+    assert email_detections[0]["action"] == "blocked"
     assert pii_resp["sessions_affected"] >= 1
 
     # The by_type and by_action summaries should reflect the detection
     assert pii_resp["by_type"].get("email", 0) >= 1
-    assert pii_resp["by_action"].get("block", 0) >= 1
+    assert pii_resp["by_action"].get("blocked", 0) >= 1

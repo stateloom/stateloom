@@ -12,7 +12,7 @@ from typing import Any
 from stateloom.core.config import StateLoomConfig
 from stateloom.core.errors import StateLoomGuardrailError
 from stateloom.core.event import GuardrailEvent
-from stateloom.core.types import GuardrailMode
+from stateloom.core.types import ActionTaken, GuardrailMode
 from stateloom.guardrails.output_scanner import SystemPromptLeakScanner
 from stateloom.guardrails.patterns import GUARDRAIL_PATTERNS, scan_text
 from stateloom.middleware.base import MiddlewareContext
@@ -131,6 +131,11 @@ class GuardrailMiddleware:
         if not self._config.guardrails_enabled:
             return await call_next(ctx)
 
+        # Skip guardrails for CLI internal overhead calls (e.g. haiku/flash
+        # quota checks) — these are system-generated, not user content.
+        if ctx.request_kwargs.get("_cli_internal"):
+            return await call_next(ctx)
+
         # === PRE-CALL: Input validation ===
         try:
             messages = ctx.request_kwargs.get("messages", [])
@@ -213,9 +218,9 @@ class GuardrailMiddleware:
                 category=match.category,
                 severity=match.severity,
                 score=1.0,
-                action_taken="blocked"
+                action_taken=ActionTaken.BLOCKED
                 if enforce and match.severity in ("high", "critical")
-                else "logged",
+                else ActionTaken.LOGGED,
                 violation_text=match.matched_text[:200],
                 scan_phase="input",
                 validator_type="heuristic",
@@ -277,7 +282,7 @@ class GuardrailMiddleware:
             category="injection",
             severity=severity,
             score=round(score, 4),
-            action_taken="blocked" if enforce and severity in ("high", "critical") else "logged",
+            action_taken=ActionTaken.BLOCKED if enforce and severity in ("high", "critical") else ActionTaken.LOGGED,
             violation_text=text[:200],
             scan_phase="input",
             validator_type="nli",
@@ -319,7 +324,7 @@ class GuardrailMiddleware:
             category=result.category,
             severity=result.severity,
             score=result.score,
-            action_taken="blocked" if enforce else "logged",
+            action_taken=ActionTaken.BLOCKED if enforce else ActionTaken.LOGGED,
             violation_text=result.raw_output[:200],
             scan_phase="input",
             validator_type="local_model",
@@ -376,7 +381,7 @@ class GuardrailMiddleware:
             category="system_prompt_leak",
             severity="high",
             score=scan_result.score,
-            action_taken="logged",  # output leaks are always logged, never blocked
+            action_taken=ActionTaken.LOGGED,  # output leaks are always logged, never blocked
             violation_text=f"leak_score={scan_result.score:.3f}",
             scan_phase="output",
             validator_type="output_scanner",

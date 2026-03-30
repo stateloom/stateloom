@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from stateloom.core.types import BudgetAction, PIIMode
+from stateloom.core.types import ActionTaken, BudgetAction, PIIMode
 
 logger = logging.getLogger("stateloom.dashboard.api")
 
@@ -544,16 +544,26 @@ def create_api_router(gate: Gate) -> APIRouter:
         collecting = False
         all_tool_steps: list[object] = []
         for e in events:
-            if e.step == parent_step:
-                collecting = True
-                continue  # skip the parent itself
-            if collecting:
-                is_tc = isinstance(e, LLMCallEvent) and getattr(e, "is_tool_continuation", False)
-                is_tool = isinstance(e, ToolCallEvent)
-                if is_tc or is_tool:
-                    all_tool_steps.append(e)
-                else:
-                    break  # reached next non-tool event
+            is_llm = isinstance(e, LLMCallEvent)
+            if not collecting:
+                # Find the parent LLM call (not compliance_audit or other events
+                # that may share the same step number).
+                if is_llm and e.step == parent_step:
+                    collecting = True
+                continue
+            # Skip non-LLM, non-ToolCall events (compliance_audit, checkpoint,
+            # etc.) that are interleaved between tool steps.
+            is_tool = isinstance(e, ToolCallEvent)
+            if not is_llm and not is_tool:
+                continue
+            is_tc = is_llm and getattr(e, "is_tool_continuation", False)
+            is_cli = is_llm and getattr(e, "is_cli_internal", False)
+            if is_tc or is_tool:
+                all_tool_steps.append(e)
+            elif is_cli:
+                continue  # skip CLI-internal events interleaved between tool steps
+            else:
+                break  # reached next non-tool LLM event
         # Apply offset and limit, with has_more detection
         page = all_tool_steps[offset : offset + limit + 1]
         has_more = len(page) > limit
@@ -2947,7 +2957,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         by_severity: dict[str, int] = {}
         for e in events:
             if isinstance(e, GuardrailEvent):
-                if e.action_taken == "blocked":
+                if e.action_taken == ActionTaken.BLOCKED:
                     blocked += 1
                 cat = e.category or "unknown"
                 by_category[cat] = by_category.get(cat, 0) + 1

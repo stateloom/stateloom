@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field
 
-from stateloom.core.types import EventType
+from stateloom.core.types import ActionTaken, EventType
 
 
 def _utcnow() -> datetime:
@@ -84,7 +84,7 @@ class PIIDetectionEvent(Event):
     pii_type: str = ""
     mode: str = ""  # "audit", "redact", "block"
     pii_field: str = ""
-    action_taken: str = ""  # "logged", "redacted", "blocked"
+    action_taken: str = ""
 
 
 class BudgetEnforcementEvent(Event):
