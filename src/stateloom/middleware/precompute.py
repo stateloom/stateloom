@@ -68,9 +68,7 @@ class PrecomputeMiddleware:
         # thread loading the CrossEncoder model.
         if self._compliance_fn:
             try:
-                profile = self._compliance_fn(
-                    ctx.session.org_id, ctx.session.team_id
-                )
+                profile = self._compliance_fn(ctx.session.org_id, ctx.session.team_id)
                 if profile and profile.block_local_routing:
                     return await call_next(ctx)
             except Exception:

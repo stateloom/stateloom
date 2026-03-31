@@ -7,7 +7,7 @@ handles patching directly instead of going through the generic interceptor.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stateloom.core.context import get_current_replay_engine
 from stateloom.core.errors import StateLoomError
@@ -17,6 +17,7 @@ from stateloom.intercept.unpatch import register_patch
 
 if TYPE_CHECKING:
     from stateloom.gate import Gate
+    from stateloom.middleware.base import StreamChunkInfo
 
 logger = logging.getLogger("stateloom.intercept.litellm")
 
@@ -46,8 +47,8 @@ class LiteLLMAdapter(BaseProviderAdapter):
         # Patching is handled by patch_litellm(), not the generic interceptor.
         return []
 
-    def extract_model(self, instance: Any, args: tuple, kwargs: dict[str, Any]) -> str:
-        return kwargs.get("model", "unknown")
+    def extract_model(self, instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+        return cast(str, kwargs.get("model", "unknown"))
 
     def extract_tokens(self, response: Any) -> tuple[int, int, int]:
         return self._extract_tokens_from_fields(response, _TOKEN_FIELDS)
@@ -55,14 +56,14 @@ class LiteLLMAdapter(BaseProviderAdapter):
     def to_openai_dict(self, response: Any, model: str, request_id: str) -> dict[str, Any]:
         """LiteLLM returns OpenAI-format responses — passthrough via model_dump."""
         if hasattr(response, "model_dump"):
-            result = response.model_dump()
+            result: dict[str, Any] = response.model_dump()
             result["id"] = request_id
             return result
         # Delegate to base class default
         return super().to_openai_dict(response, model, request_id)
 
     def is_streaming(self, kwargs: dict[str, Any]) -> bool:
-        return kwargs.get("stream", False)
+        return cast(bool, kwargs.get("stream", False))
 
     def extract_stream_tokens(self, chunk: Any, accumulated: dict[str, int]) -> dict[str, int]:
         try:
@@ -154,7 +155,7 @@ def _intercept_litellm_sync(
     gate: Gate,
     adapter: LiteLLMAdapter,
     original: Any,
-    args: tuple,
+    args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
     """Intercept a sync litellm.completion call through the middleware pipeline."""
@@ -207,7 +208,7 @@ async def _intercept_litellm_async(
     gate: Gate,
     adapter: LiteLLMAdapter,
     original: Any,
-    args: tuple,
+    args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
     """Intercept an async litellm.acompletion call through the middleware pipeline."""

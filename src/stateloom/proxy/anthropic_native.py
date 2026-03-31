@@ -18,7 +18,7 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -26,7 +26,6 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from stateloom.proxy.auth import (
     AuthResult,
     ProxyAuth,
-    _StubKey,
     authenticate_request,
     enforce_vk_policies,
     format_policy_error,
@@ -44,6 +43,7 @@ from stateloom.proxy.stream_helpers import SSE_HEADERS, passthrough_stream_relay
 
 if TYPE_CHECKING:
     from stateloom.gate import Gate
+    from stateloom.proxy.virtual_key import VirtualKey
 
 logger = logging.getLogger("stateloom.proxy.anthropic_native")
 
@@ -103,7 +103,7 @@ def create_anthropic_router(
     router = APIRouter()
     proxy_auth = ProxyAuth(gate)
     proxy_rate_limiter = ProxyRateLimiter(
-        metrics=gate._metrics_collector,
+        metrics=gate._metrics_collector,  # type: ignore[arg-type]
         enabled=gate.config.rate_limiting_enabled,
     )
 
@@ -155,7 +155,7 @@ def create_anthropic_router(
         # forward directly to upstream, bypass middleware pipeline entirely
         # so they don't clutter the session waterfall.
         if passthrough is not None and _is_cli_preflight(body, request):
-            _pf_keys = proxy_auth.get_provider_keys(vk) if vk.org_id else {}
+            _pf_keys = proxy_auth.get_provider_keys(cast("VirtualKey", vk)) if vk.org_id else {}
             auth_value = _pf_keys.get("anthropic", "") or byok_key or raw_token
             upstream_url = f"{gate.config.proxy.upstream_anthropic}/v1/messages"
             headers = filter_headers(
@@ -226,19 +226,23 @@ def create_anthropic_router(
         # Session ID: prefer explicit header > Claude CLI metadata > sticky > random
         claude_session = _extract_claude_session_id(body)
         session_id = resolve_session_id(
-            x_stateloom_session_id or claude_session, request, sticky_session,
+            x_stateloom_session_id or claude_session,
+            request,
+            sticky_session,
         )
         session_name = derive_session_name(request, model, "anthropic")
 
         logger.info(
             "POST /v1/messages model=%s vk=%s session=%s",
-            model, vk.id if hasattr(vk, "id") else "anonymous", session_id or "-",
+            model,
+            vk.id if hasattr(vk, "id") else "anonymous",
+            session_id or "-",
         )
 
         # Resolve provider keys for VK mode
         provider_keys: dict[str, str] = {}
         if vk.org_id:
-            provider_keys = proxy_auth.get_provider_keys(vk)
+            provider_keys = proxy_auth.get_provider_keys(cast("VirtualKey", vk))
         if byok_key:
             provider_keys["anthropic"] = byok_key
 
@@ -397,20 +401,11 @@ async def _handle_passthrough(
                 session.end_user = end_user
             session.next_step()
 
-            # Detect CLI internal overhead calls (e.g. haiku quota/token
-            # counts with longer prompts that weren't caught by
-            # _is_cli_preflight).  All calls in this handler are proxy-
-            # originated, so no session-name guard is needed.
             request_kwargs: dict[str, Any] = {
                 "messages": openai_messages,
                 "model": model,
+                "_proxy": True,
             }
-            if "haiku" in model:
-                non_system = [
-                    m for m in openai_messages if m.get("role") != "system"
-                ]
-                if len(non_system) == 1 and non_system[0].get("role") == "user":
-                    request_kwargs["_cli_internal"] = True
 
             ctx = MiddlewareContext(
                 session=session,
@@ -419,9 +414,9 @@ async def _handle_passthrough(
                 model=model,
                 method="messages.create",
                 request_kwargs=request_kwargs,
-                request_hash="" if stream else gate.pipeline._hash_request(
-                    {"messages": openai_messages, "model": model}
-                ),
+                request_hash=""
+                if stream
+                else gate.pipeline._hash_request({"messages": openai_messages, "model": model}),
                 provider_base_url=gate.config.proxy.upstream_anthropic,
             )
 
@@ -525,7 +520,7 @@ async def _handle_passthrough(
                             "_status_code": resp.status_code,
                             **error_data,
                         }
-                    return resp.json()
+                    return cast(dict[str, Any], resp.json())
 
                 result = await gate.pipeline.execute(ctx, llm_call)
 
@@ -579,7 +574,7 @@ async def _handle_streaming_passthrough(
         _status, content = _map_error(exc)
         return _anthropic_sse("error", content).encode("utf-8")
 
-    return await passthrough_stream_relay(
+    return await passthrough_stream_relay(  # type: ignore[return-value]
         passthrough,
         upstream_url,
         body,
@@ -865,7 +860,7 @@ def _response_to_anthropic(raw_response: Any, model: str) -> dict[str, Any]:
     # Native Anthropic response — pass through
     if hasattr(raw_response, "model_dump") and hasattr(raw_response, "stop_reason"):
         try:
-            return raw_response.model_dump()
+            return cast(dict[str, Any], raw_response.model_dump())
         except Exception:
             pass
 
@@ -904,14 +899,14 @@ def _extract_text(raw_response: Any) -> str:
         return ""
     try:
         if hasattr(raw_response, "choices") and raw_response.choices:
-            return raw_response.choices[0].message.content or ""
+            return cast(str, raw_response.choices[0].message.content or "")
         if hasattr(raw_response, "content") and hasattr(raw_response, "stop_reason"):
             blocks = raw_response.content
             if blocks and hasattr(blocks[0], "text"):
-                return blocks[0].text
+                return cast(str, blocks[0].text)
         if hasattr(raw_response, "candidates"):
             cand = raw_response.candidates[0]
-            return cand.content.parts[0].text
+            return cast(str, cand.content.parts[0].text)
     except Exception:
         pass
     return str(raw_response)

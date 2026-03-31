@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger("stateloom.ee")
 
@@ -85,14 +85,14 @@ def license_has_feature(feature: str) -> bool:
     """Check if the current license authorizes a specific feature."""
     if _license_payload is None:
         return False
-    return _license_payload.has_feature(feature)
+    return cast(bool, _license_payload.has_feature(feature))
 
 
 def license_info() -> dict[str, Any] | None:
     """Return license details, or None if not licensed."""
     if _license_payload is None:
         return None
-    return _license_payload.to_dict()
+    return cast(dict[str, Any], _license_payload.to_dict())
 
 
 def is_restricted_dev_mode() -> bool:

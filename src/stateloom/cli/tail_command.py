@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 import click
 import websockets
 
 
-def _format_event(data: dict) -> str | None:
+def _format_event(data: dict[str, Any]) -> str | None:
     """Format an event dict into a console-friendly line using Rich."""
     from rich.console import Console
     from rich.text import Text

@@ -43,7 +43,7 @@ class RedisJobQueue:
 
     def __init__(self, store: Store, url: str = "redis://localhost:6379") -> None:
         try:
-            import redis
+            import redis  # type: ignore[import-not-found]
         except ImportError:
             raise ImportError(
                 "Redis package is required for RedisJobQueue. "
@@ -164,7 +164,7 @@ class RedisJobQueue:
         job.retry_count = 0
         job.started_at = None
         job.completed_at = None
-        job.error = None
+        job.error = ""
         self._store.save_job(job)
         self._redis.xadd(_STREAM_KEY, {"job_id": job.id})
         return True

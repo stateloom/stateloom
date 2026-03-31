@@ -350,7 +350,7 @@ class TestMiddlewareStreamingCallbacks:
     async def test_blast_radius_registers_callback(self):
         from stateloom.middleware.blast_radius import BlastRadiusMiddleware
 
-        config = _make_config()
+        config = _make_config(blast_radius_enabled=True)
         middleware = BlastRadiusMiddleware(config=config)
         ctx = self._make_streaming_ctx()
 
@@ -364,7 +364,7 @@ class TestMiddlewareStreamingCallbacks:
     async def test_blast_radius_callback_resets_on_success(self):
         from stateloom.middleware.blast_radius import BlastRadiusMiddleware
 
-        config = _make_config()
+        config = _make_config(blast_radius_enabled=True)
         middleware = BlastRadiusMiddleware(config=config)
 
         # Record some failures first
@@ -385,7 +385,7 @@ class TestMiddlewareStreamingCallbacks:
     async def test_blast_radius_callback_records_failure(self):
         from stateloom.middleware.blast_radius import BlastRadiusMiddleware
 
-        config = _make_config()
+        config = _make_config(blast_radius_enabled=True)
         middleware = BlastRadiusMiddleware(config=config)
         ctx = self._make_streaming_ctx()
 

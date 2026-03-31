@@ -71,8 +71,8 @@ stateloom.init(
 | `budget` | `float \| None` | `None` | Per-session budget in USD |
 | `pii` | `bool` | `False` | Enable PII detection |
 | `pii_rules` | `list[PIIRule]` | `None` | Per-pattern PII rules |
-| `dashboard` | `bool` | `True` | Start dashboard at localhost:4781 |
-| `dashboard_port` | `int` | `4781` | Dashboard port |
+| `dashboard` | `bool` | `True` | Start dashboard at localhost:4782 |
+| `dashboard_port` | `int` | `4782` | Dashboard port |
 | `console_output` | `bool` | `True` | Print per-call summary to terminal |
 | `fail_open` | `bool` | `True` | Middleware errors never break LLM calls |
 | `store_backend` | `str` | `"sqlite"` | `"sqlite"`, `"memory"`, or `"postgres"` |
@@ -1406,7 +1406,7 @@ print(agent.id)                # "agt-abc123"
 print(agent.active_version_id) # "agv-xyz789"
 
 # The agent is now accessible via the proxy:
-# POST http://localhost:4781/v1/agents/legal-bot/chat/completions
+# POST http://localhost:4782/v1/agents/legal-bot/chat/completions
 ```
 
 **Parameters:**

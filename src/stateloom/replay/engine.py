@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from stateloom.core.context import set_current_replay_engine, set_current_session
+from stateloom.core.context import (
+    get_current_replay_engine,
+    get_current_session,
+    set_current_replay_engine,
+    set_current_session,
+)
 from stateloom.core.errors import StateLoomReplayError
+from stateloom.core.types import SessionStatus
 from stateloom.replay.safety import analyze_replay_safety, display_safety_warnings
 from stateloom.replay.schema import deserialize_response, serialize_response
 from stateloom.replay.step import StepRecord
@@ -45,6 +51,9 @@ class ReplayEngine:
         self._step_index: dict[int, StepRecord] = {}
         self._active = False
         self._network_blocker: Any = None
+        self._replay_session: Any = None
+        self._previous_session: Any = None
+        self._previous_replay_engine: Any = None
 
     def start(self) -> None:
         """Start a replay session."""
@@ -82,14 +91,21 @@ class ReplayEngine:
             except ImportError:
                 logger.warning("Network blocker not available")
 
+        # Save previous ContextVars for clean restoration on stop()
+        self._previous_session = get_current_session()
+        self._previous_replay_engine = get_current_replay_engine()
+
         # Store reference in ContextVar (async/thread-safe, no global mutation)
         set_current_replay_engine(self)
 
-        # Set up the replay session
+        # Set up the replay session and persist to store so EventRecorder
+        # can save events for live steps during partial replay.
         session = self.gate.session_manager.create(
             session_id=f"replay-{self.session_id}",
             name=f"Replay of {self.session_id}",
         )
+        self.gate.store.save_session(session)
+        self._replay_session = session
         set_current_session(session)
         self._active = True
 
@@ -125,20 +141,39 @@ class ReplayEngine:
         if record is None:
             return None
         if record.cached_response_json is not None:
-            return deserialize_response(record.cached_response_json, record.provider)
+            return cast(object, deserialize_response(record.cached_response_json, record.provider))
         return record.cached_response
 
     def stop(self) -> None:
-        """Stop the replay and deactivate network blocker."""
+        """Stop the replay and deactivate network blocker.
+
+        Restores the previous session and replay engine ContextVars so
+        subsequent code doesn't inherit polluted state.
+        """
         self._active = False
-        set_current_replay_engine(None)
+
+        # Mark the replay session as completed and persist.
+        if self._replay_session is not None:
+            if self._replay_session.status in (
+                SessionStatus.ACTIVE,
+                SessionStatus.SUSPENDED,
+            ):
+                self._replay_session.end(SessionStatus.COMPLETED)
+            self.gate.store.save_session(self._replay_session)
+            self._replay_session = None
+
+        set_current_replay_engine(self._previous_replay_engine)
+        set_current_session(self._previous_session)
+        self._previous_session = None
+        self._previous_replay_engine = None
         if self._network_blocker is not None:
             self._network_blocker.deactivate()
             self._network_blocker = None
 
     def __enter__(self) -> ReplayEngine:
-        """Context manager entry — starts the replay engine."""
-        self.start()
+        """Context manager entry — starts the replay engine if not already active."""
+        if not self._active:
+            self.start()
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
@@ -174,6 +209,7 @@ class ReplayEngine:
                 mutates_state=getattr(event, "mutates_state", False),
                 cached_response=cached_result,
                 cached_response_json=cached_json,
+                prompt_preview=getattr(event, "prompt_preview", ""),
             )
             steps.append(step)
 
@@ -199,14 +235,24 @@ class DurableReplayEngine:
         cache_tools: bool = False,
         stream_delay_ms: float = 0,
     ) -> None:
-        self._step_index: dict[int, StepRecord] = {
-            s.step: s for s in steps if s.cached_response_json is not None
-        }
-        self._tool_step_index: dict[int, StepRecord] = {
-            s.step: s
-            for s in steps
-            if s.event_type == "tool_call" and s.cached_response_json is not None
-        }
+        # Re-number steps sequentially starting from 1. On durable resume the
+        # step_counter is reset to 0, so next_step() yields 1, 2, 3, …
+        # regardless of the original step numbers (which may have gaps due to
+        # checkpoint events that don't carry cached responses).
+        llm_steps = sorted(
+            (s for s in steps if s.cached_response_json is not None),
+            key=lambda s: s.step,
+        )
+        self._step_index: dict[int, StepRecord] = {i + 1: s for i, s in enumerate(llm_steps)}
+        tool_steps = sorted(
+            (
+                s
+                for s in steps
+                if s.event_type == "tool_call" and s.cached_response_json is not None
+            ),
+            key=lambda s: s.step,
+        )
+        self._tool_step_index: dict[int, StepRecord] = {i + 1: s for i, s in enumerate(tool_steps)}
         self._active = bool(self._step_index) or bool(self._tool_step_index)
         self._cache_tools = cache_tools
         self._stream_delay_ms = stream_delay_ms
@@ -229,10 +275,13 @@ class DurableReplayEngine:
         record = self._step_index.get(step)
         if record is None or record.cached_response_json is None:
             return None
-        return deserialize_response(
-            record.cached_response_json,
-            record.provider,
-            delay_ms=self._stream_delay_ms,
+        return cast(
+            object,
+            deserialize_response(
+                record.cached_response_json,
+                record.provider,
+                delay_ms=self._stream_delay_ms,
+            ),
         )
 
     def stop(self) -> None:
@@ -255,6 +304,7 @@ def _load_durable_steps(gate: Gate, session_id: str) -> list[StepRecord]:
                 provider=getattr(event, "provider", None),
                 model=getattr(event, "model", None),
                 cached_response_json=cached_json,
+                prompt_preview=getattr(event, "prompt_preview", ""),
             )
         )
     return steps

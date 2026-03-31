@@ -195,7 +195,7 @@ def test_global_budget_enforcement(e2e_gate, api_client):
                 llm_call=lambda: response,
             )
 
-    # Second session — also budget exceeded after first call (independent budget)
+    # Second session — also per-session budget exceeded after first call (independent)
     with gate.session(session_id="prod-global-budget-2") as s2:
         invoke_pipeline(
             gate,
@@ -208,5 +208,41 @@ def test_global_budget_enforcement(e2e_gate, api_client):
                 gate,
                 s2,
                 {"messages": [{"role": "user", "content": "Again"}]},
+                llm_call=lambda: response,
+            )
+
+
+def test_cross_session_global_budget(e2e_gate, api_client):
+    """budget_global enforces a cumulative cap across all sessions.
+
+    Session 1 succeeds but consumes most of the global budget.
+    Session 2 is blocked because global spend has been reached.
+    """
+    gate = e2e_gate(
+        cache=False,
+        budget=10.0,  # high per-session budget (not the constraint)
+        budget_on_middleware_failure="block",
+        budget_global=0.0001,  # very low cross-session cap
+    )
+    client = api_client(gate)
+    response = make_openai_response("Resp", prompt_tokens=1000, completion_tokens=500)
+
+    # Session 1 — first call succeeds, costs > $0.0001
+    with gate.session(session_id="cross-global-1") as s1:
+        invoke_pipeline(
+            gate,
+            s1,
+            {"messages": [{"role": "user", "content": "Hi"}]},
+            llm_call=lambda: response,
+        )
+        assert s1.total_cost > 0
+
+    # Session 2 — global budget now exceeded, first call should be blocked
+    with gate.session(session_id="cross-global-2") as s2:
+        with pytest.raises(StateLoomBudgetError):
+            invoke_pipeline(
+                gate,
+                s2,
+                {"messages": [{"role": "user", "content": "Hello"}]},
                 llm_call=lambda: response,
             )

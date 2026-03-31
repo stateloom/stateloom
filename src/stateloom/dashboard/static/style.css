@@ -3070,6 +3070,10 @@ h3 {
     font-size: 28px;
     margin-bottom: 8px;
 }
+#mt-readiness {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
 .mt-readiness-card {
-    min-width: 280px;
+    min-width: 0;
+    overflow: hidden;
 }

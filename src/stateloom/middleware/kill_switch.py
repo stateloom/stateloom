@@ -54,12 +54,21 @@ class KillSwitchMiddleware:
         self._store = store
         self._metrics = metrics
         self._last_store_poll: float = 0.0
+        # Snapshot config at init time so _sync_from_store only applies
+        # changes made *externally* (dashboard API), never clobbering
+        # in-memory state set by the local process via stateloom.kill_switch().
+        self._last_known_active: bool = config.kill_switch_active
 
     def _sync_from_store(self) -> None:
         """Poll persisted kill switch state from the store.
 
         Called at most once per _STORE_POLL_INTERVAL seconds to avoid
         hitting the store on every request.
+
+        Only applies store state when the in-memory config has NOT been
+        changed locally since the last sync.  This prevents the store
+        (which may hold stale data from a previous process) from
+        clobbering a programmatic ``stateloom.kill_switch(active=True)``.
         """
         if not self._store:
             return
@@ -67,10 +76,19 @@ class KillSwitchMiddleware:
         if now - self._last_store_poll < _STORE_POLL_INTERVAL:
             return
         self._last_store_poll = now
+
+        # If the in-memory value was changed since our last sync (by the
+        # local process calling stateloom.kill_switch()), respect that —
+        # don't let a stale store value overwrite it.
+        if self._config.kill_switch_active != self._last_known_active:
+            self._last_known_active = self._config.kill_switch_active
+            return
+
         try:
             active = self._store.get_secret(_STORE_KEY_ACTIVE)
             if active:
                 self._config.kill_switch_active = active == "1"
+                self._last_known_active = self._config.kill_switch_active
             message = self._store.get_secret(_STORE_KEY_MESSAGE)
             if message:
                 self._config.kill_switch_message = message
@@ -80,9 +98,7 @@ class KillSwitchMiddleware:
             rules_json = self._store.get_secret(_STORE_KEY_RULES)
             if rules_json:
                 rules_data = json.loads(rules_json)
-                self._config.kill_switch_rules = [
-                    KillSwitchRule(**r) for r in rules_data
-                ]
+                self._config.kill_switch_rules = [KillSwitchRule(**r) for r in rules_data]
         except Exception:
             logger.debug("Failed to sync kill switch state from store", exc_info=True)
 
@@ -103,13 +119,16 @@ class KillSwitchMiddleware:
         if matched_rule is not None:
             logger.warning(
                 "Kill switch: rule matched for session=%s model=%s provider=%s rule=%s",
-                ctx.session.id, ctx.model, ctx.provider,
+                ctx.session.id,
+                ctx.model,
+                ctx.provider,
                 matched_rule.model_dump(exclude_none=True),
             )
         else:
             logger.warning(
                 "Kill switch: global kill switch active, blocking session=%s model=%s",
-                ctx.session.id, ctx.model,
+                ctx.session.id,
+                ctx.model,
             )
 
         # Determine message: rule-specific overrides global

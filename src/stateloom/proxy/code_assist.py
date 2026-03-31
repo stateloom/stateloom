@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -32,7 +32,6 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from stateloom.proxy.auth import (
     AuthResult,
     ProxyAuth,
-    _StubKey,
     authenticate_request,
     format_policy_error,
     resolve_vk_rate_limit_id,
@@ -53,6 +52,7 @@ from stateloom.proxy.stream_helpers import SSE_HEADERS
 
 if TYPE_CHECKING:
     from stateloom.gate import Gate
+    from stateloom.proxy.virtual_key import VirtualKey
 
 logger = logging.getLogger("stateloom.proxy.code_assist")
 
@@ -61,9 +61,11 @@ _RESPONSE_HOP_BY_HOP = RESPONSE_HOP_BY_HOP_HEADERS
 
 # Gemini CLI user_prompt_id values that indicate CLI-internal requests
 # (not user-initiated prompts). These calls should be marked as cli_internal.
-_CLI_INTERNAL_PROMPT_IDS = frozenset({
-    "session-summary-generation",
-})
+_CLI_INTERNAL_PROMPT_IDS = frozenset(
+    {
+        "session-summary-generation",
+    }
+)
 
 
 def create_code_assist_router(
@@ -75,7 +77,7 @@ def create_code_assist_router(
     router = APIRouter()
     proxy_auth = ProxyAuth(gate)
     proxy_rate_limiter = ProxyRateLimiter(
-        metrics=gate._metrics_collector,
+        metrics=gate._metrics_collector,  # type: ignore[arg-type]
         enabled=gate.config.rate_limiting_enabled,
     )
 
@@ -157,7 +159,7 @@ def create_code_assist_router(
         else:
             if vk.rate_limit_tps is not None:
                 try:
-                    await proxy_rate_limiter.check(vk)
+                    await proxy_rate_limiter.check(cast("VirtualKey", vk))
                 except StateLoomRateLimitError:
                     _ca_policy_err = "key_rate_limit_exceeded"
         if _ca_policy_err is not None:
@@ -194,15 +196,18 @@ def create_code_assist_router(
 
         logger.info(
             "POST /code-assist/%s model=%s vk=%s session=%s prompt_id=%s%s",
-            version, model, vk.id if hasattr(vk, "id") else "anonymous",
-            session_id or "-", user_prompt_id or "-",
+            version,
+            model,
+            vk.id if hasattr(vk, "id") else "anonymous",
+            session_id or "-",
+            user_prompt_id or "-",
             " [cli-internal]" if _cli_internal else "",
         )
 
         # Resolve provider keys (for VK mode only)
         provider_keys: dict[str, str] = {}
         if vk.org_id:
-            provider_keys = proxy_auth.get_provider_keys(vk)
+            provider_keys = proxy_auth.get_provider_keys(cast("VirtualKey", vk))
 
         # Rate limit slot tracking
         _vk_id = resolve_vk_rate_limit_id(vk)
@@ -416,6 +421,7 @@ async def _handle_passthrough(
             request_kwargs: dict[str, Any] = {
                 "messages": openai_messages,
                 "model": model,
+                "_proxy": True,
             }
             if cli_internal:
                 request_kwargs["_cli_internal"] = True
@@ -429,9 +435,9 @@ async def _handle_passthrough(
                 model=model,
                 method="generateContent",
                 request_kwargs=request_kwargs,
-                request_hash="" if stream else gate.pipeline._hash_request(
-                    {"messages": openai_messages, "model": model}
-                ),
+                request_hash=""
+                if stream
+                else gate.pipeline._hash_request({"messages": openai_messages, "model": model}),
                 provider_base_url=gate.config.proxy.upstream_code_assist,
             )
 
@@ -472,8 +478,7 @@ async def _handle_passthrough(
 
                 # Check if middleware stripped all non-system messages
                 remaining = [
-                    m for m in ctx.request_kwargs.get("messages", [])
-                    if m.get("role") != "system"
+                    m for m in ctx.request_kwargs.get("messages", []) if m.get("role") != "system"
                 ]
                 if not remaining:
                     return _emit_cached_as_stream(
@@ -488,7 +493,11 @@ async def _handle_passthrough(
                 forwarded_body = raw_body
                 current_messages = ctx.request_kwargs.get("messages", [])
                 if current_messages != original_messages:
-                    forwarded_body = _patch_code_assist_body(body, original_messages, current_messages)
+                    forwarded_body = _patch_code_assist_body(
+                        body,
+                        original_messages,
+                        current_messages,
+                    )
 
                 return await _handle_streaming_passthrough(
                     passthrough,
@@ -501,7 +510,6 @@ async def _handle_passthrough(
                 )
 
             else:
-
                 # Check if PII Phase 1 stripped the active turn
                 if session.metadata.get("_pii_active_turn_stripped"):
                     return JSONResponse(
@@ -517,8 +525,7 @@ async def _handle_passthrough(
 
                 # Check if middleware stripped all non-system messages
                 remaining_ns = [
-                    m for m in ctx.request_kwargs.get("messages", [])
-                    if m.get("role") != "system"
+                    m for m in ctx.request_kwargs.get("messages", []) if m.get("role") != "system"
                 ]
                 if not remaining_ns:
                     return JSONResponse(
@@ -536,7 +543,11 @@ async def _handle_passthrough(
                     forwarded_body = raw_body
                     current_messages = ctx.request_kwargs.get("messages", [])
                     if current_messages != original_messages:
-                        forwarded_body = _patch_code_assist_body(body, original_messages, current_messages)
+                        forwarded_body = _patch_code_assist_body(
+                            body,
+                            original_messages,
+                            current_messages,
+                        )
 
                     resp = await passthrough.forward(upstream_url, forwarded_body, upstream_headers)
                     if resp.status_code >= 400:
@@ -549,7 +560,7 @@ async def _handle_passthrough(
                             "_status_code": resp.status_code,
                             **error_data,
                         }
-                    return resp.json()
+                    return cast(dict[str, Any], resp.json())
 
                 result = await gate.pipeline.execute(ctx, llm_call)
 
@@ -576,9 +587,7 @@ async def _handle_passthrough(
                 f"detected {exc.pii_type}. "
                 f"Please remove sensitive information and try again."
             )
-            return _emit_cached_as_stream(
-                _make_content_policy_response(error_text, model)
-            )
+            return _emit_cached_as_stream(_make_content_policy_response(error_text, model))
 
         status, content = _map_error(exc)
         return JSONResponse(status_code=status, content=content)
@@ -635,7 +644,7 @@ async def _handle_streaming_passthrough(
         except Exception as exc:
             logger.exception("Code Assist proxy streaming error")
             _status, content = _map_error(exc)
-            yield f"data: {json.dumps(content)}\n\n".encode("utf-8")
+            yield f"data: {json.dumps(content)}\n\n".encode()
         finally:
             if ctx is not None:
                 for cb in ctx._on_stream_complete:
@@ -846,41 +855,51 @@ def _contents_to_openai_messages(
         if function_responses:
             # Gemini tool results → OpenAI role="tool" messages
             if text_parts:
-                messages.append({
-                    "role": openai_role, "content": "\n".join(text_parts),
-                    "_content_idx": ci,
-                })
+                messages.append(
+                    {
+                        "role": openai_role,
+                        "content": "\n".join(text_parts),
+                        "_content_idx": ci,
+                    }
+                )
             for fr in function_responses:
                 resp = fr.get("response", {})
-                messages.append({
-                    "role": "tool",
-                    "content": json.dumps(resp) if isinstance(resp, dict) else str(resp),
-                    "tool_call_id": fr.get("name", "unknown"),
-                    "_content_idx": ci,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "content": json.dumps(resp) if isinstance(resp, dict) else str(resp),
+                        "tool_call_id": fr.get("name", "unknown"),
+                        "_content_idx": ci,
+                    }
+                )
         elif function_calls:
             # Gemini function calls → OpenAI assistant + tool_calls
-            messages.append({
-                "role": "assistant",
-                "content": "\n".join(text_parts) if text_parts else None,
-                "tool_calls": [
-                    {
-                        "id": fc.get("name", "unknown"),
-                        "type": "function",
-                        "function": {
-                            "name": fc.get("name", "unknown"),
-                            "arguments": json.dumps(fc.get("args", {})),
-                        },
-                    }
-                    for fc in function_calls
-                ],
-                "_content_idx": ci,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "\n".join(text_parts) if text_parts else None,
+                    "tool_calls": [
+                        {
+                            "id": fc.get("name", "unknown"),
+                            "type": "function",
+                            "function": {
+                                "name": fc.get("name", "unknown"),
+                                "arguments": json.dumps(fc.get("args", {})),
+                            },
+                        }
+                        for fc in function_calls
+                    ],
+                    "_content_idx": ci,
+                }
+            )
         elif text_parts:
-            messages.append({
-                "role": openai_role, "content": "\n".join(text_parts),
-                "_content_idx": ci,
-            })
+            messages.append(
+                {
+                    "role": openai_role,
+                    "content": "\n".join(text_parts),
+                    "_content_idx": ci,
+                }
+            )
 
     return messages
 

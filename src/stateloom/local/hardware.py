@@ -8,6 +8,7 @@ import platform
 import shutil
 import subprocess
 from dataclasses import dataclass
+from typing import Any
 
 from stateloom.local.models import MODEL_CATALOG
 
@@ -57,9 +58,9 @@ def _detect_ram() -> float:
     """Detect total system RAM in GB."""
     # Try psutil first (most accurate)
     try:
-        import psutil
+        import psutil  # type: ignore[import-untyped]
 
-        return psutil.virtual_memory().total / (1024**3)
+        return float(psutil.virtual_memory().total / (1024**3))
     except ImportError:
         pass
 
@@ -104,7 +105,7 @@ def _detect_gpu(info: HardwareInfo) -> tuple[str, float]:
     return ("", 0.0)
 
 
-def recommend_models(hardware: HardwareInfo | None = None) -> list[dict]:
+def recommend_models(hardware: HardwareInfo | None = None) -> list[dict[str, Any]]:
     """Recommend models based on available hardware.
 
     Returns models sorted by tier, filtered to fit in available memory

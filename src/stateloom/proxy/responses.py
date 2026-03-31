@@ -24,7 +24,7 @@ import logging
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Header, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -32,7 +32,6 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from stateloom.proxy.auth import (
     AuthResult,
     ProxyAuth,
-    _StubKey,
     authenticate_request,
     format_policy_error,
     resolve_vk_rate_limit_id,
@@ -53,6 +52,7 @@ if TYPE_CHECKING:
     from starlette.datastructures import Headers
 
     from stateloom.gate import Gate
+    from stateloom.proxy.virtual_key import VirtualKey
 
 logger = logging.getLogger("stateloom.proxy.responses")
 
@@ -169,6 +169,7 @@ async def _run_ws_middleware(
         request_kwargs={
             "messages": openai_msgs,
             "model": ws_state.current_model,
+            "_proxy": True,
         },
         request_hash="",  # WS is always streaming; cache skips streaming
         provider_base_url=gate.config.proxy.upstream_openai,
@@ -230,7 +231,7 @@ def create_responses_router(
     router = APIRouter()
     proxy_auth = ProxyAuth(gate)
     proxy_rate_limiter = ProxyRateLimiter(
-        metrics=gate._metrics_collector,
+        metrics=gate._metrics_collector,  # type: ignore[arg-type]
         enabled=gate.config.rate_limiting_enabled,
     )
 
@@ -282,7 +283,7 @@ def create_responses_router(
         upstream_token = byok_key or raw_token
         if not upstream_token:
             if vk.org_id:
-                provider_keys = proxy_auth.get_provider_keys(vk)
+                provider_keys = proxy_auth.get_provider_keys(cast("VirtualKey", vk))
                 upstream_token = provider_keys.get("openai", "")
             if not upstream_token:
                 bare = strip_bearer(auth_header)
@@ -647,7 +648,7 @@ def create_responses_router(
         else:
             if vk.rate_limit_tps is not None:
                 try:
-                    await proxy_rate_limiter.check(vk)
+                    await proxy_rate_limiter.check(cast("VirtualKey", vk))
                 except StateLoomRateLimitError:
                     _resp_policy_err = "key_rate_limit_exceeded"
         if _resp_policy_err is not None:
@@ -670,13 +671,15 @@ def create_responses_router(
 
         logger.info(
             "POST /v1/responses model=%s vk=%s session=%s",
-            model, vk.id if hasattr(vk, "id") else "anonymous", session_id or "-",
+            model,
+            vk.id if hasattr(vk, "id") else "anonymous",
+            session_id or "-",
         )
 
         # Resolve provider keys: BYOK headers > org secrets > direct BYOK
         provider_keys: dict[str, str] = {}
         if vk.org_id:
-            provider_keys = proxy_auth.get_provider_keys(vk)
+            provider_keys = proxy_auth.get_provider_keys(cast("VirtualKey", vk))
         if x_stateloom_openai_key:
             provider_keys["openai"] = x_stateloom_openai_key
         elif byok_key:
@@ -1028,10 +1031,10 @@ async def _handle_passthrough(
                 provider="openai",
                 model=model,
                 method="responses.create",
-                request_kwargs={"messages": openai_messages, "model": model},
-                request_hash="" if stream else gate.pipeline._hash_request(
-                    {"messages": openai_messages, "model": model}
-                ),
+                request_kwargs={"messages": openai_messages, "model": model, "_proxy": True},
+                request_hash=""
+                if stream
+                else gate.pipeline._hash_request({"messages": openai_messages, "model": model}),
                 provider_base_url=gate.config.proxy.upstream_openai,
             )
 
@@ -1097,7 +1100,7 @@ async def _handle_passthrough(
                             "_status_code": resp.status_code,
                             **error_data,
                         }
-                    return resp.json()
+                    return cast(dict[str, Any], resp.json())
 
                 result = await gate.pipeline.execute(ctx, llm_call)
 
@@ -1211,7 +1214,7 @@ async def _handle_streaming_passthrough(
                         "code": "internal_error",
                     }
                 }
-            yield f"data: {json.dumps(error)}\n\n".encode("utf-8")
+            yield f"data: {json.dumps(error)}\n\n".encode()
         finally:
             if ctx is not None:
                 for cb in ctx._on_stream_complete:

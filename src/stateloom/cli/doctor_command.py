@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-from typing import Any
 
 import click
 import httpx

@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -192,7 +192,7 @@ def _is_langchain_cache_hit(response: Any) -> bool:
 # ---------------------------------------------------------------------------
 if _HAS_LANGCHAIN:
 
-    class StateLoomCallbackHandler(BaseCallbackHandler):  # type: ignore[misc]  # Conditional class definition based on optional dep
+    class StateLoomCallbackHandler(BaseCallbackHandler):
         """LangChain callback handler that records events in StateLoom.
 
         Tracks LLM calls (with cost / token / latency data) and tool calls.
@@ -275,15 +275,17 @@ if _HAS_LANGCHAIN:
                 from stateloom.core.context import set_framework_context
 
                 model, provider = _extract_model_and_provider(serialized)
-                set_framework_context({
-                    "langchain": {
-                        "run_id": str(run_id),
-                        "chain_name": serialized.get("name", ""),
-                        "tags": kwargs.get("tags", []),
-                        "model": model,
-                        "provider": provider,
+                set_framework_context(
+                    {
+                        "langchain": {
+                            "run_id": str(run_id),
+                            "chain_name": serialized.get("name", ""),
+                            "tags": kwargs.get("tags", []),
+                            "model": model,
+                            "provider": provider,
+                        }
                     }
-                })
+                )
                 if self._effective_tools_only:
                     return
                 gate = self._gate
@@ -321,15 +323,17 @@ if _HAS_LANGCHAIN:
                 from stateloom.core.context import set_framework_context
 
                 model, provider = _extract_model_and_provider(serialized)
-                set_framework_context({
-                    "langchain": {
-                        "run_id": str(run_id),
-                        "chain_name": serialized.get("name", ""),
-                        "tags": kwargs.get("tags", []),
-                        "model": model,
-                        "provider": provider,
+                set_framework_context(
+                    {
+                        "langchain": {
+                            "run_id": str(run_id),
+                            "chain_name": serialized.get("name", ""),
+                            "tags": kwargs.get("tags", []),
+                            "model": model,
+                            "provider": provider,
+                        }
                     }
-                })
+                )
                 if self._effective_tools_only:
                     return
                 gate = self._gate
@@ -343,7 +347,9 @@ if _HAS_LANGCHAIN:
                         if getattr(msg, "type", "") == "human":
                             content = getattr(msg, "content", "")
                             if isinstance(content, str):
-                                prompt_preview = (content[:50] + "...") if len(content) > 50 else content
+                                prompt_preview = (
+                                    (content[:50] + "...") if len(content) > 50 else content
+                                )
                             break
                 state = _LLMRunState(
                     model=model,
@@ -408,10 +414,7 @@ if _HAS_LANGCHAIN:
                 #      Only applied when response has LangChain's LLMResult
                 #      structure (generations) to avoid false positives on raw
                 #      SDK responses.
-                is_cache_hit = (
-                    not llm_output
-                    or _is_langchain_cache_hit(response)
-                )
+                is_cache_hit = not llm_output or _is_langchain_cache_hit(response)
                 if not is_cache_hit and latency_ms < 100:
                     if getattr(response, "generations", None):
                         is_cache_hit = True

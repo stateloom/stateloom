@@ -47,7 +47,7 @@ class LogBuffer(logging.Handler):
             except Exception:
                 pass
 
-    def get_logs(self, limit: int = 200, level: str | None = None) -> list[dict]:
+    def get_logs(self, limit: int = 200, level: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             entries = list(self._buffer)
         if level:

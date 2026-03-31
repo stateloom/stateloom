@@ -11,7 +11,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stateloom.core.session import Session
 from stateloom.intercept.unpatch import get_original
@@ -88,8 +88,8 @@ def _extract_content(response: Any, provider: str) -> str:
             choices = response.get("choices", [])
             if choices:
                 msg = choices[0].get("message", {})
-                return msg.get("content", "")
-            return response.get("content", "")
+                return cast(str, msg.get("content", ""))
+            return cast(str, response.get("content", ""))
 
         # Use adapter for provider-specific extraction
         from stateloom.intercept.provider_registry import get_adapter
@@ -312,9 +312,16 @@ class Client:
             self._session_cm = None
 
     def close(self) -> None:
-        """End the session and clean up."""
+        """End the session and clean up (sync path)."""
         if self._session_cm is not None:
             self._session_cm.__exit__(None, None, None)
+            self._session = None
+            self._session_cm = None
+
+    async def aclose(self) -> None:
+        """End the session and clean up (async path)."""
+        if self._session_cm is not None:
+            await self._session_cm.__aexit__(None, None, None)
             self._session = None
             self._session_cm = None
 
@@ -396,7 +403,10 @@ class Client:
 
         logger.debug(
             "Client.chat: provider=%s model=%s session=%s auto_route=%s",
-            provider, resolved_model, session.id, auto_route_eligible,
+            provider,
+            resolved_model,
+            session.id,
+            auto_route_eligible,
         )
 
         try:
@@ -444,9 +454,20 @@ class Client:
         Raises:
             StateLoomError: On middleware policy violations.
         """
+        from stateloom.core.context import get_current_session
+
+        gate = _get_gate()
+        self._gate = gate
+
+        # Always prefer the active session from the ContextVar.  This handles
+        # the case where _default_client is reused across multiple session
+        # blocks (same pattern as sync _ensure_session).
+        if self._session_kwargs.get("session_id") is None:
+            existing = get_current_session()
+            if existing is not None:
+                self._session = existing
+
         if self._session is None:
-            gate = _get_gate()
-            self._gate = gate
             self._session_cm = gate.async_session(**self._session_kwargs)
             self._session = await self._session_cm.__aenter__()
             if self._billing_mode != "api":
@@ -474,7 +495,10 @@ class Client:
         )
         logger.debug(
             "Client.achat: provider=%s model=%s session=%s auto_route=%s",
-            provider, resolved_model, session.id, auto_route_eligible,
+            provider,
+            resolved_model,
+            session.id,
+            auto_route_eligible,
         )
         result = await gate.pipeline.execute(ctx, llm_call)
         return self._build_response(result, resolved_model, provider, ctx)
@@ -648,7 +672,7 @@ class Client:
             original = get_original(type(client.chat.completions), "create")
             method = original or client.chat.completions.create
             if original:
-                return method(client.chat.completions, **request_kwargs)
+                return method(client.chat.completions, **request_kwargs)  # type: ignore[call-overload]
             return method(**request_kwargs)
 
         return request_kwargs, llm_call
@@ -712,7 +736,7 @@ class Client:
             original = get_original(type(client.messages), "create")
             method = original or client.messages.create
             if original:
-                return method(client.messages, **request_kwargs)
+                return method(client.messages, **request_kwargs)  # type: ignore[call-overload]
             return method(**request_kwargs)
 
         return request_kwargs, llm_call
@@ -769,7 +793,7 @@ class Client:
 
         def llm_call() -> Any:
             try:
-                from google.generativeai import GenerativeModel
+                from google.generativeai import GenerativeModel  # type: ignore[attr-defined]
             except ImportError:
                 raise ImportError(
                     "google-generativeai package is required for Gemini models. "
@@ -779,7 +803,7 @@ class Client:
             if self._provider_keys.get("google"):
                 import google.generativeai as genai
 
-                genai.configure(api_key=self._provider_keys["google"])
+                genai.configure(api_key=self._provider_keys["google"])  # type: ignore[attr-defined]
 
             # Rebuild contents from messages at call time so middleware
             # modifications (e.g. PII redaction) are reflected.
@@ -809,8 +833,8 @@ class Client:
                     generation_config=_gen_config or None,
                 )
             return gen_model.generate_content(
-                live_contents,
-                generation_config=_gen_config or None,
+                live_contents,  # type: ignore[arg-type]
+                generation_config=_gen_config or None,  # type: ignore[arg-type]
             )
 
         return request_kwargs, llm_call
@@ -882,7 +906,9 @@ def chat(
 ) -> ChatResponse:
     """One-liner sync chat through the full middleware pipeline.
 
-    Uses a default Client with auto-created session.
+    When called outside an explicit ``stateloom.session()`` block, creates a
+    throwaway session for the single call and closes it immediately after.
+    Inside a session block, reuses the active session.
 
     Args:
         model: Model to use. When provided, no auto-routing. When omitted,
@@ -894,7 +920,12 @@ def chat(
     global _default_client
     if _default_client is None:
         _default_client = Client()
-    return _default_client.chat(model=model, messages=messages, agent=agent, **kwargs)
+    result = _default_client.chat(model=model, messages=messages, agent=agent, **kwargs)
+    # Close the auto-created session so it doesn't leak into later calls.
+    # When inside an explicit session block, _session_cm is None (session
+    # came from ContextVar), so close() is a no-op.
+    _default_client.close()
+    return result
 
 
 async def achat(
@@ -906,7 +937,9 @@ async def achat(
 ) -> ChatResponse:
     """One-liner async chat through the full middleware pipeline.
 
-    Uses a default Client with auto-created session.
+    When called outside an explicit ``stateloom.async_session()`` block,
+    creates a throwaway session for the single call and closes it immediately
+    after.  Inside a session block, reuses the active session.
 
     Args:
         model: Model to use. When provided, no auto-routing. When omitted,
@@ -918,4 +951,6 @@ async def achat(
     global _default_client
     if _default_client is None:
         _default_client = Client()
-    return await _default_client.achat(model=model, messages=messages, agent=agent, **kwargs)
+    result = await _default_client.achat(model=model, messages=messages, agent=agent, **kwargs)
+    _default_client.close()
+    return result

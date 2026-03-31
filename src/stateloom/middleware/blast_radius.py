@@ -82,9 +82,7 @@ class BlastRadiusMiddleware:
             if "enabled" in data:
                 self._config.blast_radius_enabled = bool(data["enabled"])
             if "consecutive_failures" in data:
-                self._config.blast_radius_consecutive_failures = int(
-                    data["consecutive_failures"]
-                )
+                self._config.blast_radius_consecutive_failures = int(data["consecutive_failures"])
             if "budget_violations_per_hour" in data:
                 self._config.blast_radius_budget_violations_per_hour = int(
                     data["budget_violations_per_hour"]
@@ -110,7 +108,11 @@ class BlastRadiusMiddleware:
                 logger.info("Blast radius: blocking already-paused session '%s'", session_id)
                 raise StateLoomBlastRadiusError(session_id=session_id, trigger="session_paused")
             if agent_id in self._paused_agents:
-                logger.info("Blast radius: blocking session '%s' — agent '%s' is paused", session_id, agent_id)
+                logger.info(
+                    "Blast radius: blocking session '%s' — agent '%s' is paused",
+                    session_id,
+                    agent_id,
+                )
                 raise StateLoomBlastRadiusError(session_id=session_id, trigger="agent_paused")
 
         if ctx.is_streaming:
@@ -195,7 +197,11 @@ class BlastRadiusMiddleware:
         logger.debug(
             "Blast radius: failure recorded session=%s agent=%s "
             "session_count=%d agent_count=%d threshold=%d",
-            session_id, agent_id, session_count, agent_count, threshold,
+            session_id,
+            agent_id,
+            session_count,
+            agent_count,
+            threshold,
         )
 
         # Pause whichever hits threshold first
@@ -396,7 +402,7 @@ class BlastRadiusMiddleware:
             self._failure_counts.pop(session_id, None)
             self._budget_violations.pop(session_id, None)
 
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """Return current blast radius state."""
         with self._lock:
             return {

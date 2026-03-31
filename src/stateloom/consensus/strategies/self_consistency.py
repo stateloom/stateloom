@@ -92,7 +92,12 @@ class SelfConsistencyStrategy:
 
         tasks = [
             _sample_call(
-                model, messages, parent_session, per_sample_budget, i, temperature,
+                model,
+                messages,
+                parent_session,
+                per_sample_budget,
+                i,
+                temperature,
                 durable=config.ee_consensus,
             )
             for i in range(samples)

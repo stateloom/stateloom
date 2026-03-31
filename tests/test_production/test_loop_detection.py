@@ -17,7 +17,7 @@ from tests.test_production.helpers import (
 
 def test_loop_detected_after_threshold(e2e_gate, api_client):
     """With threshold=3, 3rd identical request is blocked (not raised)."""
-    gate = e2e_gate(cache=False, loop_exact_threshold=3)
+    gate = e2e_gate(cache=False, loop_detection=True, loop_threshold=3)
     client = api_client(gate)
     response = make_openai_response("Loop reply")
     request_kwargs = {"messages": [{"role": "user", "content": "Same thing"}]}
@@ -34,7 +34,7 @@ def test_loop_detected_after_threshold(e2e_gate, api_client):
 
 def test_loop_different_messages_no_detection(e2e_gate, api_client):
     """Varied messages → no loop detected."""
-    gate = e2e_gate(cache=False, loop_exact_threshold=3)
+    gate = e2e_gate(cache=False, loop_detection=True, loop_threshold=3)
     client = api_client(gate)
     response = make_openai_response("Reply")
 
@@ -54,7 +54,7 @@ def test_loop_different_messages_no_detection(e2e_gate, api_client):
 
 def test_loop_event_persisted(e2e_gate, api_client):
     """Loop detected → request blocked, loop_detection event persisted."""
-    gate = e2e_gate(cache=False, loop_exact_threshold=2)
+    gate = e2e_gate(cache=False, loop_detection=True, loop_threshold=2)
     client = api_client(gate)
     response = make_openai_response("Loop")
     request_kwargs = {"messages": [{"role": "user", "content": "Repeat"}]}
@@ -74,7 +74,7 @@ def test_loop_event_persisted(e2e_gate, api_client):
 
 def test_loop_threshold_configurable(e2e_gate, api_client):
     """Custom threshold=5 — no block on first 4, blocked on 5th."""
-    gate = e2e_gate(cache=False, loop_exact_threshold=5)
+    gate = e2e_gate(cache=False, loop_detection=True, loop_threshold=5)
     client = api_client(gate)
     response = make_openai_response("OK")
     request_kwargs = {"messages": [{"role": "user", "content": "Again and again"}]}

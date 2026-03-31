@@ -753,14 +753,23 @@ function switchModelsTab(tab) {
 }
 
 async function loadCloudModels() {
-    const [config, stats, costData, cloudModels] = await Promise.all([
+    const [config, stats, costData, cloudModels, licData] = await Promise.all([
         fetchJSON('/config'),
         fetchJSON('/stats'),
         fetchJSON('/stats/cost-by-model'),
         fetchJSON('/models/cloud'),
+        fetchJSON('/license'),
     ]);
 
-    // Populate default model dropdown
+    // Check enterprise license for model override
+    let modelOverrideLicensed = false;
+    try {
+        if (licData && licData.features && licData.features.model_override) {
+            modelOverrideLicensed = licData.features.model_override.enabled;
+        }
+    } catch (e) { /* default unlicensed */ }
+
+    // Populate model override dropdown
     const select = document.getElementById('models-default-model');
     const currentVal = config?.default_model || '';
     select.innerHTML = '<option value="">None</option>';
@@ -784,6 +793,18 @@ async function loadCloudModels() {
     }
     select.value = currentVal;
 
+    // Gate model override behind enterprise license
+    const lockNote = document.getElementById('model-override-lock');
+    if (!modelOverrideLicensed) {
+        select.disabled = true;
+        select.style.opacity = '0.45';
+        if (lockNote) lockNote.style.display = 'block';
+    } else {
+        select.disabled = false;
+        select.style.opacity = '1';
+        if (lockNote) lockNote.style.display = 'none';
+    }
+
     // Stat cards
     if (stats) {
         document.getElementById('models-cloud-spend').textContent = '$' + (stats.total_cost || 0).toFixed(4);
@@ -801,11 +822,15 @@ async function loadCloudModels() {
 
 async function saveDefaultModel() {
     const model = document.getElementById('models-default-model').value;
-    await fetch(`${API_BASE}/config`, {
+    const resp = await fetch(`${API_BASE}/config`, {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ default_model: model }),
     });
+    if (resp.status === 403) {
+        showToast('Emergency model override requires an enterprise license', 'error');
+        return;
+    }
     const flash = document.getElementById('flash-default-model');
     flash.classList.add('visible');
     setTimeout(() => flash.classList.remove('visible'), 2000);
@@ -1411,6 +1436,10 @@ function groupEventsIntoSteps(events) {
             (!isLocalRouteInfo && !isLlmAfterLocalRoute &&
              _PRIMARY_EVENT_TYPES.has(event.event_type));
 
+        // PII logged/redacted events precede their LLM call, so they should
+        // queue in pendingSubEvents even when a previous step is open.
+        const isPiiSubEvent = event.event_type === 'pii_detection' && !isPiiBlocked;
+
         if (isPrimary) {
             // Start a new step group, absorbing any pending sub-events
             currentStep = {
@@ -1423,6 +1452,9 @@ function groupEventsIntoSteps(events) {
             };
             pendingSubEvents = [];
             steps.push(currentStep);
+        } else if (isPiiSubEvent) {
+            // PII events always defer to the next primary (their LLM call)
+            pendingSubEvents.push(event);
         } else if (currentStep) {
             // Sub-event — attach to current step
             currentStep.subEvents.push(event);
@@ -3261,9 +3293,9 @@ async function loadGuardrailEvents() {
 }
 
 async function toggleNLI(enabled) {
-    await fetch('/api/security/guardrails/configure', {
+    await fetchJSON('/security/guardrails/configure', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json', ...authHeaders()},
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({nli_enabled: enabled})
     });
     await loadGuardrails();
@@ -3456,10 +3488,25 @@ async function toggleForceLocal(enabled) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({auto_route_force_local: enabled}),
     });
-    // Force-local auto-enables auto_route — refresh toggles
+    // Force-local auto-enables auto_route and may auto-select a model — refresh UI
     const config = await fetchJSON('/config');
     if (config) {
         document.getElementById('auto-route-toggle').checked = config.auto_route_enabled || false;
+        // Refresh active model dropdown in case one was auto-selected
+        const activeSelect = document.getElementById('active-model-select');
+        const currentActive = config.local_model_default || '';
+        if (currentActive && activeSelect) {
+            // Set the value — the option should already exist from loadLocalStatus
+            activeSelect.value = currentActive;
+            if (!activeSelect.value) {
+                // Option not in dropdown yet — add it
+                const opt = document.createElement('option');
+                opt.value = currentActive;
+                opt.textContent = currentActive;
+                activeSelect.appendChild(opt);
+                activeSelect.value = currentActive;
+            }
+        }
     }
 }
 
@@ -3566,7 +3613,8 @@ async function loadSettings() {
     document.getElementById('settings-cache-enabled').textContent = config.cache_enabled ? 'Yes' : 'No';
     document.getElementById('settings-cache-max-size').value = config.cache_max_size || 1000;
 
-    document.getElementById('settings-loop-threshold').value = config.loop_exact_threshold || 3;
+    document.getElementById('settings-loop-enabled').checked = config.loop_detection_enabled || false;
+    document.getElementById('settings-loop-threshold').value = config.loop_exact_threshold || 5;
 
     document.getElementById('settings-retention-days').value = config.store_retention_days || 30;
 
@@ -3586,6 +3634,7 @@ async function saveSettings(section) {
     } else if (section === 'cache') {
         body.cache_max_size = parseInt(document.getElementById('settings-cache-max-size').value);
     } else if (section === 'loop') {
+        body.loop_detection_enabled = document.getElementById('settings-loop-enabled').checked;
         body.loop_exact_threshold = parseInt(document.getElementById('settings-loop-threshold').value);
     } else if (section === 'storage') {
         body.store_retention_days = parseInt(document.getElementById('settings-retention-days').value);

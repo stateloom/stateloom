@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stateloom.core.context import set_current_session
 from stateloom.core.errors import StateLoomError
@@ -30,7 +30,7 @@ class JobProcessor:
         self._max_workers = max_workers
         self._executor: ThreadPoolExecutor | None = None
         self._poll_thread: threading.Thread | None = None
-        self._active_jobs: dict[str, Future] = {}
+        self._active_jobs: dict[str, Future[None]] = {}
         self._active_jobs_lock = threading.Lock()
         self._shutdown_event = threading.Event()
 
@@ -214,7 +214,7 @@ class JobProcessor:
         )
         return result
 
-    def _build_llm_call(self, provider: str, request_kwargs: dict) -> Any:
+    def _build_llm_call(self, provider: str, request_kwargs: dict[str, Any]) -> Any:
         """Build a callable that invokes the original (unpatched) provider SDK.
 
         The job processor already runs its own pipeline via execute_sync().
@@ -223,30 +223,30 @@ class JobProcessor:
         """
         from stateloom.intercept.unpatch import get_original
 
-        def _call():
+        def _call() -> Any:
             if provider in ("openai", ""):
                 import openai
 
-                client = openai.OpenAI()
-                original = get_original(type(client.chat.completions), "create")
+                oai_client = openai.OpenAI()
+                original = get_original(type(oai_client.chat.completions), "create")
                 if original:
-                    return original(client.chat.completions, **request_kwargs)
-                return client.chat.completions.create(**request_kwargs)
+                    return original(oai_client.chat.completions, **request_kwargs)
+                return oai_client.chat.completions.create(**request_kwargs)
             elif provider == "anthropic":
                 import anthropic
 
-                client = anthropic.Anthropic()
-                original = get_original(type(client.messages), "create")
+                anth_client = anthropic.Anthropic()
+                original = get_original(type(anth_client.messages), "create")
                 if original:
-                    return original(client.messages, **request_kwargs)
-                return client.messages.create(**request_kwargs)
+                    return original(anth_client.messages, **request_kwargs)
+                return anth_client.messages.create(**request_kwargs)
             elif provider in ("google", "gemini"):
-                from google.generativeai import GenerativeModel
+                from google.generativeai import GenerativeModel  # type: ignore[attr-defined]
 
                 messages = request_kwargs.get("messages", [])
                 model_name = request_kwargs.get("model", "gemini-2.5-flash")
 
-                contents = []
+                contents: list[dict[str, Any]] = []
                 system_instruction = None
                 for msg in messages:
                     role = msg.get("role", "user")
@@ -276,21 +276,21 @@ class JobProcessor:
                         generation_config=gen_config or None,
                     )
                 return gen_model.generate_content(
-                    contents,
-                    generation_config=gen_config or None,
+                    contents,  # type: ignore[arg-type]
+                    generation_config=gen_config or None,  # type: ignore[arg-type]
                 )
             else:
                 import openai
 
-                client = openai.OpenAI()
-                original = get_original(type(client.chat.completions), "create")
+                oai_client2 = openai.OpenAI()
+                original = get_original(type(oai_client2.chat.completions), "create")
                 if original:
-                    return original(client.chat.completions, **request_kwargs)
-                return client.chat.completions.create(**request_kwargs)
+                    return original(oai_client2.chat.completions, **request_kwargs)
+                return oai_client2.chat.completions.create(**request_kwargs)
 
         return _call
 
-    def _serialize_result(self, result: Any) -> dict:
+    def _serialize_result(self, result: Any) -> dict[str, Any]:
         """Serialize an LLM response to a JSON-safe dict."""
         if result is None:
             return {}
@@ -298,9 +298,9 @@ class JobProcessor:
             return result
         # Try pydantic model_dump (OpenAI/Anthropic SDK objects)
         if hasattr(result, "model_dump"):
-            return result.model_dump()
+            return cast(dict[str, Any], result.model_dump())
         if hasattr(result, "to_dict"):
-            return result.to_dict()
+            return cast(dict[str, Any], result.to_dict())
         return {"raw": str(result)}
 
     def _record_event(self, job: Job, elapsed_ms: float) -> None:

@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 import threading
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -22,10 +23,10 @@ _clients: set[WebSocket] = set()
 _clients_lock = threading.Lock()
 
 
-def create_websocket_route(gate: Gate):
+def create_websocket_route(gate: Gate) -> Callable[..., Any]:
     """Create the WebSocket endpoint handler."""
 
-    async def websocket_handler(websocket: WebSocket):
+    async def websocket_handler(websocket: WebSocket) -> None:
         await websocket.accept()
         with _clients_lock:
             _clients.add(websocket)
@@ -65,7 +66,7 @@ def create_websocket_route(gate: Gate):
     return websocket_handler
 
 
-async def broadcast_event(event_data: dict) -> None:
+async def broadcast_event(event_data: dict[str, Any]) -> None:
     """Broadcast an event to all connected WebSocket clients."""
     with _clients_lock:
         if not _clients:
@@ -86,7 +87,7 @@ async def broadcast_event(event_data: dict) -> None:
             _clients.difference_update(disconnected)
 
 
-async def broadcast_session_update(session_data: dict) -> None:
+async def broadcast_session_update(session_data: dict[str, Any]) -> None:
     """Broadcast a session update to all connected clients."""
     with _clients_lock:
         if not _clients:
@@ -107,10 +108,10 @@ async def broadcast_session_update(session_data: dict) -> None:
             _clients.difference_update(disconnected)
 
 
-def create_log_websocket_route(gate: Gate):
+def create_log_websocket_route(gate: Gate) -> Callable[..., Any]:
     """Create a WebSocket endpoint for streaming server logs (debug mode only)."""
 
-    async def log_ws_handler(websocket: WebSocket):
+    async def log_ws_handler(websocket: WebSocket) -> None:
         if not getattr(gate.config, "debug", False):
             await websocket.close(code=1008, reason="Debug mode not enabled")
             return
@@ -123,7 +124,7 @@ def create_log_websocket_route(gate: Gate):
             return
 
         await websocket.accept()
-        queue: asyncio.Queue = asyncio.Queue(maxsize=_LOG_WS_QUEUE_SIZE)
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=_LOG_WS_QUEUE_SIZE)
         buf.subscribe(queue)
 
         try:
@@ -147,7 +148,7 @@ def create_log_websocket_route(gate: Gate):
     return log_ws_handler
 
 
-def broadcast_sync(event_data: dict) -> None:
+def broadcast_sync(event_data: dict[str, Any]) -> None:
     """Fire-and-forget broadcast from a synchronous context."""
     try:
         loop = asyncio.new_event_loop()

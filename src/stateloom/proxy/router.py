@@ -12,7 +12,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -22,7 +22,6 @@ from stateloom.core.errors import StateLoomRateLimitError
 from stateloom.proxy.auth import (
     AuthResult,
     ProxyAuth,
-    _StubKey,
     authenticate_request,
     enforce_vk_policies,
     format_policy_error,
@@ -46,6 +45,7 @@ from stateloom.proxy.stream_helpers import SSE_HEADERS, passthrough_stream_relay
 
 if TYPE_CHECKING:
     from stateloom.gate import Gate
+    from stateloom.proxy.virtual_key import VirtualKey
 
 logger = logging.getLogger("stateloom.proxy.router")
 
@@ -72,7 +72,7 @@ def create_proxy_router(
     router = APIRouter()
     proxy_auth = ProxyAuth(gate)
     proxy_rate_limiter = ProxyRateLimiter(
-        metrics=gate._metrics_collector,
+        metrics=gate._metrics_collector,  # type: ignore[arg-type]
         enabled=gate.config.rate_limiting_enabled,
     )
 
@@ -185,7 +185,9 @@ def create_proxy_router(
 
         logger.info(
             "POST /v1/chat/completions model=%s vk=%s session=%s",
-            model, vk.id or "anonymous", session_id or "-",
+            model,
+            vk.id or "anonymous",
+            session_id or "-",
         )
 
         # Request ID for the response
@@ -195,7 +197,7 @@ def create_proxy_router(
         # Resolve provider keys: BYOK headers > org secrets > global config
         provider_keys: dict[str, str] = {}
         if vk.org_id:
-            provider_keys = proxy_auth.get_provider_keys(vk)
+            provider_keys = proxy_auth.get_provider_keys(cast("VirtualKey", vk))
         if x_stateloom_openai_key:
             provider_keys["openai"] = x_stateloom_openai_key
         if x_stateloom_anthropic_key:
@@ -250,6 +252,7 @@ def create_proxy_router(
                 billing_mode=billing_mode,
                 proxy_rate_limiter=proxy_rate_limiter,
                 vk_id=_vk_id,
+                end_user=end_user,
             )
 
         # Fallback: SDK-based flow via Client (cross-provider, or no passthrough)
@@ -451,7 +454,7 @@ def create_proxy_router(
         else:
             if vk.rate_limit_tps is not None:
                 try:
-                    await proxy_rate_limiter.check(vk)
+                    await proxy_rate_limiter.check(cast("VirtualKey", vk))
                 except StateLoomRateLimitError:
                     _agent_policy_err = "key_rate_limit_exceeded"
         if _agent_policy_err is not None:
@@ -478,7 +481,10 @@ def create_proxy_router(
 
         logger.info(
             "POST /v1/agents/%s/chat/completions model=%s vk=%s session=%s",
-            agent_ref, model, vk.id or "anonymous", session_id or "-",
+            agent_ref,
+            model,
+            vk.id or "anonymous",
+            session_id or "-",
         )
 
         # Request ID for the response
@@ -487,7 +493,7 @@ def create_proxy_router(
         # Resolve provider keys: BYOK headers > org secrets > global config
         provider_keys: dict[str, str] = {}
         if vk.org_id:
-            provider_keys = proxy_auth.get_provider_keys(vk)
+            provider_keys = proxy_auth.get_provider_keys(cast("VirtualKey", vk))
         if x_stateloom_openai_key:
             provider_keys["openai"] = x_stateloom_openai_key
         if x_stateloom_anthropic_key:
@@ -659,6 +665,7 @@ async def _handle_openai_passthrough(
     billing_mode: str,
     proxy_rate_limiter: ProxyRateLimiter,
     vk_id: str | None,
+    end_user: str = "",
 ) -> Response:
     """Handle OpenAI request via HTTP passthrough with middleware pipeline.
 
@@ -721,10 +728,10 @@ async def _handle_openai_passthrough(
                 provider="openai",
                 model=model,
                 method="chat.completions.create",
-                request_kwargs={"messages": messages, "model": model},
-                request_hash="" if stream else gate.pipeline._hash_request(
-                    {"messages": messages, "model": model}
-                ),
+                request_kwargs={"messages": messages, "model": model, "_proxy": True},
+                request_hash=""
+                if stream
+                else gate.pipeline._hash_request({"messages": messages, "model": model}),
                 provider_base_url=gate.config.proxy.upstream_openai,
             )
 
@@ -778,7 +785,7 @@ async def _handle_openai_passthrough(
                             "_status_code": resp.status_code,
                             **error_data,
                         }
-                    return resp.json()
+                    return cast(dict[str, Any], resp.json())
 
                 result = await gate.pipeline.execute(ctx, llm_call)
 
@@ -848,9 +855,9 @@ async def _handle_streaming_openai_passthrough(
                     "code": "internal_error",
                 }
             }
-        return f"data: {json.dumps(error)}\n\ndata: [DONE]\n\n".encode("utf-8")
+        return f"data: {json.dumps(error)}\n\ndata: [DONE]\n\n".encode()
 
-    return await passthrough_stream_relay(
+    return await passthrough_stream_relay(  # type: ignore[return-value]
         passthrough,
         upstream_url,
         body,

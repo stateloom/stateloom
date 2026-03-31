@@ -40,7 +40,7 @@ def upgrade() -> None:
     _safe_add_column("sessions", "s_transport", "TEXT", "DEFAULT ''")
 
     # Backfill from existing metadata JSON for historical sessions
-    _COL_META_MAP = {
+    col_meta_map = {
         "s_billing_mode": "billing_mode",
         "s_agent_id": "agent_id",
         "s_agent_slug": "agent_slug",
@@ -48,7 +48,7 @@ def upgrade() -> None:
         "s_agent_name": "agent_name",
         "s_transport": "transport",
     }
-    for col, meta_key in _COL_META_MAP.items():
+    for col, meta_key in col_meta_map.items():
         try:
             op.execute(
                 f"UPDATE sessions SET {col} = json_extract(metadata, '$.{meta_key}') "

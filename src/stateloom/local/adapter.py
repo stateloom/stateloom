@@ -30,8 +30,8 @@ class OllamaAdapter(BaseProviderAdapter):
         # No SDK to patch — Ollama calls are made via OllamaClient
         return []
 
-    def extract_model(self, instance: Any, args: tuple, kwargs: dict[str, Any]) -> str:
-        return kwargs.get("model", "unknown")
+    def extract_model(self, instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+        return str(kwargs.get("model", "unknown"))
 
     def extract_tokens(self, response: Any) -> tuple[int, int, int]:
         if isinstance(response, OllamaResponse):

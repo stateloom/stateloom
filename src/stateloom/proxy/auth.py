@@ -127,7 +127,8 @@ def authenticate_request(
             if vk is not None:
                 logger.debug(
                     "VK auth success: id=%s team=%s org=%s",
-                    getattr(vk, "id", ""), getattr(vk, "team_id", ""),
+                    getattr(vk, "id", ""),
+                    getattr(vk, "team_id", ""),
                     getattr(vk, "org_id", ""),
                 )
                 return AuthResult(vk=vk)
@@ -136,8 +137,7 @@ def authenticate_request(
             return AuthResult(
                 vk=None,
                 error_hint=(
-                    "Virtual key not found or revoked. "
-                    "Check that your ag-* token is valid."
+                    "Virtual key not found or revoked. Check that your ag-* token is valid."
                 ),
             )
         if config.proxy.require_virtual_key and has_byok:
@@ -154,8 +154,7 @@ def authenticate_request(
         return AuthResult(
             vk=None,
             error_hint=(
-                "A virtual key (ag-*) is required. "
-                "The provided token is not a valid virtual key."
+                "A virtual key (ag-*) is required. The provided token is not a valid virtual key."
             ),
         )
 
@@ -206,16 +205,22 @@ async def enforce_vk_policies(
         if not proxy_auth.check_budget(vk):
             logger.warning(
                 "VK policy: budget exceeded for key %s (spent=%.4f, limit=%.4f)",
-                vk.id, vk.budget_spent, vk.budget_limit,
+                vk.id,
+                vk.budget_spent,
+                vk.budget_limit,
             )
             return "key_budget_exceeded"
 
     # Rate limit
     if vk.rate_limit_tps is not None:
         try:
-            await proxy_rate_limiter.check(vk)
+            await proxy_rate_limiter.check(vk)  # type: ignore[arg-type]
         except StateLoomRateLimitError:
-            logger.info("VK policy: rate limit exceeded for key %s (tps=%.1f)", vk.id, vk.rate_limit_tps)
+            logger.info(
+                "VK policy: rate limit exceeded for key %s (tps=%.1f)",
+                vk.id,
+                vk.rate_limit_tps,
+            )
             return "key_rate_limit_exceeded"
 
     # Scope
@@ -223,16 +228,16 @@ async def enforce_vk_policies(
         if not proxy_auth.check_scope(vk, required_scope):
             logger.warning(
                 "VK policy: scope '%s' denied for key %s (scopes=%s)",
-                required_scope, vk.id, vk.scopes,
+                required_scope,
+                vk.id,
+                vk.scopes,
             )
             return f"scope_denied:{required_scope}"
 
     return None
 
 
-def format_policy_error(
-    policy_error: str, model: str, default_scope: str
-) -> tuple[int, str, str]:
+def format_policy_error(policy_error: str, model: str, default_scope: str) -> tuple[int, str, str]:
     """Parse policy error string into (status_code, error_code, message).
 
     Returns a tuple usable by all proxy endpoint error formatters.
@@ -401,7 +406,11 @@ class ProxyAuth:
                 org_key = store.get_secret(f"org:{vk.org_id}:provider_key_{provider}")
                 if org_key:
                     keys[provider] = org_key
-                    logger.debug("Provider key resolved for %s: org secret (org=%s)", provider, vk.org_id)
+                    logger.debug(
+                        "Provider key resolved for %s: org secret (org=%s)",
+                        provider,
+                        vk.org_id,
+                    )
                     continue
 
             # Fall back to global config

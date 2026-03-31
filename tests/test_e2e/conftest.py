@@ -28,6 +28,7 @@ def e2e_gate():
             "console_output": False,
             "store_backend": "memory",
             "local_model": None,
+            "auto_route_semantic_enabled": False,
         }
         defaults.update(kwargs)
         return stateloom.init(**defaults)

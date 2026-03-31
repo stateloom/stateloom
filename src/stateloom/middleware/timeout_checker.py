@@ -54,8 +54,11 @@ class TimeoutCheckerMiddleware:
         timed_out, timeout_type, elapsed, limit = session.is_timed_out()
         if timed_out:
             self._save_lifecycle_event(
-                ctx, action="timed_out", reason=timeout_type,
-                elapsed=elapsed, limit=limit,
+                ctx,
+                action="timed_out",
+                reason=timeout_type,
+                elapsed=elapsed,
+                limit=limit,
             )
             session.end(SessionStatus.TIMED_OUT)
             raise StateLoomTimeoutError(

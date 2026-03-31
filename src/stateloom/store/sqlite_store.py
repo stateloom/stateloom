@@ -11,7 +11,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stateloom.core.config import ComplianceProfile, PIIRule
 from stateloom.core.event import AnyEvent, Event
@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(event_type, timestamp);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
 
@@ -553,7 +554,8 @@ class SQLiteStore:
             "CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)"
         )
         self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_end_user ON sessions(end_user) WHERE end_user != ''"
+            "CREATE INDEX IF NOT EXISTS idx_sessions_end_user"
+            " ON sessions(end_user) WHERE end_user != ''"
         )
 
         # Auth tables (for databases created before this version)
@@ -728,7 +730,7 @@ class SQLiteStore:
         conn = self._get_conn()
         query = "SELECT * FROM sessions"
         conditions: list[str] = []
-        params: list = []
+        params: list[Any] = []
         if status:
             conditions.append("status = ?")
             params.append(status)
@@ -758,7 +760,7 @@ class SQLiteStore:
         conn = self._get_conn()
         query = "SELECT COUNT(*) FROM sessions"
         conditions: list[str] = []
-        params: list = []
+        params: list[Any] = []
         if status:
             conditions.append("status = ?")
             params.append(status)
@@ -888,7 +890,7 @@ class SQLiteStore:
         conn = self._get_conn()
         if session_id:
             query = "SELECT * FROM events WHERE session_id = ?"
-            params: list = [session_id]
+            params: list[Any] = [session_id]
         else:
             query = "SELECT * FROM events WHERE 1=1"
             params = []
@@ -900,7 +902,7 @@ class SQLiteStore:
         rows = conn.execute(query, params).fetchall()
         return [self._row_to_event(r) for r in rows]
 
-    def get_global_stats(self) -> dict:
+    def get_global_stats(self) -> dict[str, Any]:
         conn = self._get_conn()
         row = conn.execute(
             """SELECT
@@ -940,6 +942,144 @@ class SQLiteStore:
             GROUP BY model"""
         ).fetchall()
         return {r["model"]: r["total_cost"] for r in rows}
+
+    # -- Observability aggregation (push computation to SQL) ----------------
+
+    def aggregate_timeseries(
+        self,
+        start_iso: str,
+        bucket_seconds: int,
+        org_id: str = "",
+        team_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """Aggregate LLM call events into time buckets using SQL.
+
+        Returns a list of dicts with keys: bucket_start, requests, cost,
+        prompt_tokens, completion_tokens.
+        """
+        conn = self._get_conn()
+        # Use SQLite's strftime to compute bucket start from the ISO timestamp.
+        # cast((julianday(timestamp) - julianday(start)) * 86400 / bucket_seconds) as integer
+        # gives the bucket index; multiply back to get the bucket start offset.
+        query = """
+            SELECT
+                CAST((julianday(timestamp) - julianday(?)) * 86400 / ? AS INTEGER) AS bucket_idx,
+                COUNT(*) AS requests,
+                COALESCE(SUM(cost), 0) AS cost,
+                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+            FROM events
+            WHERE event_type = 'llm_call' AND timestamp >= ?
+        """
+        params: list[Any] = [start_iso, bucket_seconds, start_iso]
+        if org_id or team_id:
+            query += " AND session_id IN (SELECT id FROM sessions WHERE 1=1"
+            if org_id:
+                query += " AND org_id = ?"
+                params.append(org_id)
+            if team_id:
+                query += " AND team_id = ?"
+                params.append(team_id)
+            query += ")"
+        query += " GROUP BY bucket_idx ORDER BY bucket_idx"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def aggregate_latency(
+        self,
+        start_iso: str,
+        org_id: str = "",
+        team_id: str = "",
+    ) -> list[float]:
+        """Return sorted latency values (ms) for LLM calls since start_iso.
+
+        Returns only non-zero latencies, already sorted ascending.
+        """
+        conn = self._get_conn()
+        query = """
+            SELECT latency_ms
+            FROM events
+            WHERE event_type = 'llm_call' AND timestamp >= ? AND latency_ms > 0
+        """
+        params: list[Any] = [start_iso]
+        if org_id or team_id:
+            query += " AND session_id IN (SELECT id FROM sessions WHERE 1=1"
+            if org_id:
+                query += " AND org_id = ?"
+                params.append(org_id)
+            if team_id:
+                query += " AND team_id = ?"
+                params.append(team_id)
+            query += ")"
+        query += " ORDER BY latency_ms ASC"
+        rows = conn.execute(query, params).fetchall()
+        return [r["latency_ms"] for r in rows]
+
+    def aggregate_breakdown(
+        self,
+        start_iso: str,
+        org_id: str = "",
+        team_id: str = "",
+    ) -> dict[str, Any]:
+        """Aggregate model/provider breakdown and cache stats via SQL.
+
+        Returns {"by_model": [...], "by_provider": [...], "cache_hits": int}.
+        """
+        conn = self._get_conn()
+
+        tenant_filter = ""
+        params: list[Any] = [start_iso]
+        if org_id or team_id:
+            tenant_filter = " AND session_id IN (SELECT id FROM sessions WHERE 1=1"
+            if org_id:
+                tenant_filter += " AND org_id = ?"
+                params.append(org_id)
+            if team_id:
+                tenant_filter += " AND team_id = ?"
+                params.append(team_id)
+            tenant_filter += ")"
+
+        # By model
+        model_rows = conn.execute(
+            f"""SELECT COALESCE(model, 'unknown') AS model,
+                       COUNT(*) AS requests,
+                       COALESCE(SUM(cost), 0) AS cost,
+                       COALESCE(SUM(total_tokens), 0) AS tokens
+                FROM events
+                WHERE event_type = 'llm_call' AND timestamp >= ?{tenant_filter}
+                GROUP BY model""",
+            params,
+        ).fetchall()
+
+        # By provider
+        provider_rows = conn.execute(
+            f"""SELECT COALESCE(provider, 'unknown') AS provider,
+                       COUNT(*) AS requests,
+                       COALESCE(SUM(cost), 0) AS cost
+                FROM events
+                WHERE event_type = 'llm_call' AND timestamp >= ?{tenant_filter}
+                GROUP BY provider""",
+            params,
+        ).fetchall()
+
+        # Cache hits
+        cache_params: list[Any] = [start_iso]
+        cache_tenant = ""
+        if org_id or team_id:
+            cache_tenant = tenant_filter
+            cache_params = list(params)
+        cache_row = conn.execute(
+            f"""SELECT COUNT(*) AS hits
+                FROM events
+                WHERE event_type = 'cache_hit' AND timestamp >= ?{cache_tenant}""",
+            cache_params,
+        ).fetchone()
+
+        return {
+            "by_model": [dict(r) for r in model_rows],
+            "by_provider": [dict(r) for r in provider_rows],
+            "cache_hits": cache_row["hits"] if cache_row else 0,
+        }
 
     def cleanup(self, retention_days: int = 30) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
@@ -1020,7 +1160,7 @@ class SQLiteStore:
     def list_experiments(self, status: str | None = None) -> list[Experiment]:
         conn = self._get_conn()
         query = "SELECT * FROM experiments"
-        params: list = []
+        params: list[Any] = []
         if status:
             query += " WHERE status = ?"
             params.append(status)
@@ -1304,7 +1444,7 @@ class SQLiteStore:
 
     # --- Hierarchy queries ---
 
-    def get_org_stats(self, org_id: str) -> dict:
+    def get_org_stats(self, org_id: str) -> dict[str, Any]:
         conn = self._get_conn()
         row = conn.execute(
             """SELECT
@@ -1322,7 +1462,7 @@ class SQLiteStore:
         result["org_id"] = org_id
         return result
 
-    def get_team_stats(self, team_id: str) -> dict:
+    def get_team_stats(self, team_id: str) -> dict[str, Any]:
         conn = self._get_conn()
         row = conn.execute(
             """SELECT
@@ -1399,7 +1539,7 @@ class SQLiteStore:
         conn = self._get_conn()
         query = "SELECT * FROM jobs"
         conditions: list[str] = []
-        params: list = []
+        params: list[Any] = []
         if status:
             conditions.append("status = ?")
             params.append(status)
@@ -1419,7 +1559,7 @@ class SQLiteStore:
             self._conn.commit()
             return cursor.rowcount > 0
 
-    def get_job_stats(self) -> dict:
+    def get_job_stats(self) -> dict[str, Any]:
         conn = self._get_conn()
         rows = conn.execute("SELECT status, COUNT(*) as cnt FROM jobs GROUP BY status").fetchall()
         by_status = {r["status"]: r["cnt"] for r in rows}
@@ -1590,7 +1730,7 @@ class SQLiteStore:
             self._conn.commit()
             return cursor.rowcount > 0
 
-    def _row_to_virtual_key(self, row: sqlite3.Row) -> Any:
+    def _row_to_virtual_key(self, row: sqlite3.Row) -> VirtualKey:
         """Convert a row to a VirtualKey."""
         from stateloom.proxy.virtual_key import VirtualKey
 
@@ -1675,7 +1815,7 @@ class SQLiteStore:
         fernet = self._get_fernet()
         try:
             if fernet:
-                return fernet.decrypt(row[0].encode()).decode()
+                return cast(str, fernet.decrypt(row[0].encode()).decode())
             return base64.b64decode(row[0]).decode()
         except Exception:
             return ""
@@ -1697,15 +1837,18 @@ class SQLiteStore:
     ) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO admin_locks (setting, value, locked_by, reason, locked_at) VALUES (?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO admin_locks"
+                " (setting, value, locked_by, reason, locked_at)"
+                " VALUES (?, ?, ?, ?, ?)",
                 (setting, value, locked_by, reason, datetime.now(timezone.utc).isoformat()),
             )
             self._conn.commit()
 
-    def get_admin_lock(self, setting: str) -> dict | None:
+    def get_admin_lock(self, setting: str) -> dict[str, Any] | None:
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT setting, value, locked_by, reason, locked_at FROM admin_locks WHERE setting = ?",
+            "SELECT setting, value, locked_by, reason, locked_at"
+            " FROM admin_locks WHERE setting = ?",
             (setting,),
         ).fetchone()
         if not row:
@@ -1718,7 +1861,7 @@ class SQLiteStore:
             "locked_at": row["locked_at"],
         }
 
-    def list_admin_locks(self) -> list[dict]:
+    def list_admin_locks(self) -> list[dict[str, Any]]:
         conn = self._get_conn()
         rows = conn.execute(
             "SELECT setting, value, locked_by, reason, locked_at FROM admin_locks ORDER BY setting"
@@ -1796,7 +1939,7 @@ class SQLiteStore:
         conn = self._get_conn()
         query = "SELECT * FROM agents"
         conditions: list[str] = []
-        params: list = []
+        params: list[Any] = []
         if team_id is not None:
             conditions.append("team_id = ?")
             params.append(team_id)
@@ -1863,10 +2006,10 @@ class SQLiteStore:
             (agent_id,),
         ).fetchone()
         if row and row["max_ver"] is not None:
-            return row["max_ver"] + 1
+            return cast(int, row["max_ver"]) + 1
         return 1
 
-    def _row_to_agent(self, row: sqlite3.Row) -> Any:
+    def _row_to_agent(self, row: sqlite3.Row) -> Agent:
         """Convert a row to an Agent."""
         from stateloom.agent.models import Agent
         from stateloom.core.types import AgentStatus
@@ -1894,7 +2037,7 @@ class SQLiteStore:
         }
         return Agent.model_validate(d)
 
-    def _row_to_agent_version(self, row: sqlite3.Row) -> Any:
+    def _row_to_agent_version(self, row: sqlite3.Row) -> AgentVersion:
         """Convert a row to an AgentVersion."""
         from stateloom.agent.models import AgentVersion
 
@@ -1937,7 +2080,7 @@ class SQLiteStore:
                 )
 
         metadata_raw = row["metadata"]
-        metadata: dict = {}
+        metadata: dict[str, Any] = {}
         if metadata_raw:
             try:
                 metadata = json.loads(metadata_raw)
@@ -1969,7 +2112,7 @@ class SQLiteStore:
 
     def _row_to_team(self, row: sqlite3.Row) -> Team:
         metadata_raw = row["metadata"]
-        metadata: dict = {}
+        metadata: dict[str, Any] = {}
         if metadata_raw:
             try:
                 metadata = json.loads(metadata_raw)
@@ -2240,7 +2383,7 @@ class SQLiteStore:
     ) -> list[User]:
         conn = self._get_conn()
         query = "SELECT * FROM users"
-        params: list = []
+        params: list[Any] = []
         if org_id is not None:
             query += " WHERE org_id = ?"
             params.append(org_id)
@@ -2258,7 +2401,7 @@ class SQLiteStore:
             self._conn.commit()
             return cursor.rowcount > 0
 
-    def _row_to_user(self, row: sqlite3.Row) -> Any:
+    def _row_to_user(self, row: sqlite3.Row) -> User:
         from stateloom.auth.models import User
         from stateloom.core.types import Role
 
@@ -2367,7 +2510,7 @@ class SQLiteStore:
             )
             self._conn.commit()
 
-    def get_refresh_token(self, token_hash: str) -> dict | None:
+    def get_refresh_token(self, token_hash: str) -> dict[str, Any] | None:
         conn = self._get_conn()
         row = conn.execute(
             "SELECT * FROM refresh_tokens WHERE token_hash = ?", (token_hash,)
@@ -2435,7 +2578,7 @@ class SQLiteStore:
             )
             self._conn.commit()
 
-    def _row_to_oidc_provider(self, row: Any) -> Any:
+    def _row_to_oidc_provider(self, row: Any) -> OIDCProvider:
         import json as _json
 
         from stateloom.auth.oidc_models import OIDCProvider
@@ -2544,7 +2687,7 @@ class SQLiteStore:
         },
     }
 
-    def _event_to_row(self, event: Event) -> tuple:
+    def _event_to_row(self, event: Event) -> tuple[Any, ...]:
         d = event.model_dump(mode="python")
         et = event.event_type
         aliases = self._COL_ALIASES.get(et, {})
@@ -2655,7 +2798,7 @@ class SQLiteStore:
         if "mutates_state" in kwargs:
             kwargs["mutates_state"] = bool(kwargs["mutates_state"])
 
-        _event_adapter = TypeAdapter(AnyEvent)
+        _event_adapter: TypeAdapter[AnyEvent] = TypeAdapter(AnyEvent)
         try:
             return _event_adapter.validate_python(kwargs)
         except Exception:

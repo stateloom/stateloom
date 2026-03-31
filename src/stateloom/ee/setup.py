@@ -103,7 +103,7 @@ def _init_observability(gate: Gate) -> None:
         try:
             from stateloom.observability.collector import MetricsCollector
 
-            gate._metrics_collector = MetricsCollector(enabled=True)
+            gate._metrics_collector = MetricsCollector(enabled=True)  # type: ignore[assignment]
         except Exception:
             logger.debug("MetricsCollector init failed", exc_info=True)
 
@@ -242,7 +242,9 @@ def _setup_ee_middleware(gate: Gate) -> None:
 
     # Kill switch at position 0 (before everything — full short-circuit)
     gate._kill_switch = KillSwitchMiddleware(
-        gate.config, gate.store, metrics=gate._metrics_collector
+        gate.config,
+        gate.store,
+        metrics=gate._metrics_collector,  # type: ignore[arg-type]
     )
     gate.pipeline.add(gate._kill_switch)
 
@@ -263,7 +265,9 @@ def _setup_ee_middleware(gate: Gate) -> None:
         from stateloom.middleware.blast_radius import BlastRadiusMiddleware
 
         gate._blast_radius = BlastRadiusMiddleware(
-            gate.config, gate.store, metrics=gate._metrics_collector
+            gate.config,
+            gate.store,
+            metrics=gate._metrics_collector,  # type: ignore[arg-type]
         )
         gate.pipeline.add(gate._blast_radius)
 
@@ -273,7 +277,7 @@ def _setup_ee_middleware(gate: Gate) -> None:
     gate._rate_limiter = RateLimiterMiddleware(
         team_lookup=gate.get_team,
         store=gate.store,
-        metrics=gate._metrics_collector,
+        metrics=gate._metrics_collector,  # type: ignore[arg-type]
     )
     gate.pipeline.add(gate._rate_limiter)
 
@@ -283,7 +287,9 @@ def _setup_ee_middleware(gate: Gate) -> None:
         from stateloom.middleware.circuit_breaker import ProviderCircuitBreakerMiddleware
 
         gate._circuit_breaker = ProviderCircuitBreakerMiddleware(
-            gate.config, gate.store, metrics=gate._metrics_collector
+            gate.config,
+            gate.store,
+            metrics=gate._metrics_collector,  # type: ignore[arg-type]
         )
         gate.pipeline.add(gate._circuit_breaker)
 

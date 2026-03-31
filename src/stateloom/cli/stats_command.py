@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 
 import click
 
 
-def _fetch(host: str, port: int, path: str) -> dict:
+def _fetch(host: str, port: int, path: str) -> dict[str, Any]:
     import httpx
 
     resp = httpx.get(f"http://{host}:{port}{path}", timeout=10)
     resp.raise_for_status()
-    return resp.json()
+    return cast(dict[str, Any], resp.json())
 
 
-def _print_stats(stats: dict, breakdown: dict, latency: dict) -> None:
+def _print_stats(stats: dict[str, Any], breakdown: dict[str, Any], latency: dict[str, Any]) -> None:
     from rich.console import Console
     from rich.table import Table
     from rich.text import Text

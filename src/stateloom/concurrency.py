@@ -38,8 +38,8 @@ def patch_threading() -> None:
         # Run the thread's target inside the captured context
         self._stateloom_ctx.run(_original_run, self)  # type: ignore[attr-defined]  # Dynamic attr on Thread for context propagation
 
-    threading.Thread.__init__ = _patched_init  # type: ignore[assignment]  # Monkey-patching Thread for context propagation
-    threading.Thread.run = _patched_run  # type: ignore[assignment]  # Monkey-patching Thread for context propagation
+    threading.Thread.__init__ = _patched_init  # type: ignore[method-assign]  # Monkey-patching Thread for context propagation
+    threading.Thread.run = _patched_run  # type: ignore[method-assign]  # Monkey-patching Thread for context propagation
     register_patch(threading.Thread, "__init__", _original_init, "threading.Thread.__init__")
     register_patch(threading.Thread, "run", _original_run, "threading.Thread.run")
 

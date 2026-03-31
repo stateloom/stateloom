@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -32,12 +33,13 @@ def _save_credentials(
     _CREDS_FILE.chmod(0o600)
 
 
-def load_credentials() -> dict | None:
+def load_credentials() -> dict[str, Any] | None:
     """Load saved credentials, returning None if missing or unreadable."""
     if not _CREDS_FILE.exists():
         return None
     try:
-        return json.loads(_CREDS_FILE.read_text())
+        result: dict[str, Any] = json.loads(_CREDS_FILE.read_text())
+        return result
     except (json.JSONDecodeError, OSError):
         return None
 

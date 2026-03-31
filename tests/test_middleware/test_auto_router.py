@@ -32,6 +32,7 @@ def _make_config(**overrides) -> StateLoomConfig:
         "auto_route_model": "llama3.2",
         "local_model_enabled": True,
         "local_model_default": "llama3.2",
+        "auto_route_semantic_enabled": False,
         "console_output": False,
     }
     defaults.update(overrides)

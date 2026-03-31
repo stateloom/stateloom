@@ -89,7 +89,7 @@ class WebhookDelivery:
             "Webhook delivery failed for job %s after %d attempts", job.id, self._max_retries
         )
 
-    def _build_payload(self, job: Job) -> dict:
+    def _build_payload(self, job: Job) -> dict[str, Any]:
         """Build the webhook payload."""
         payload: dict[str, Any] = {
             "job_id": job.id,

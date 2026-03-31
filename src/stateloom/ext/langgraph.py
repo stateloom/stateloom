@@ -10,7 +10,7 @@ from __future__ import annotations
 import functools
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stateloom.core.event import ToolCallEvent
 from stateloom.intercept.unpatch import register_patch
@@ -26,8 +26,8 @@ def _extract_tool_name(request: Any) -> str:
     # New API: ToolCallRequest with .tool_call dict
     tool_call = getattr(request, "tool_call", request)
     if isinstance(tool_call, dict):
-        return tool_call.get("name", "unknown")
-    return getattr(tool_call, "name", "unknown")
+        return cast(str, tool_call.get("name", "unknown"))
+    return cast(str, getattr(tool_call, "name", "unknown"))
 
 
 def patch_langgraph_tools(gate: Gate | None = None) -> None:
@@ -61,7 +61,8 @@ def patch_langgraph_tools(gate: Gate | None = None) -> None:
 
     def _record_tool(tool_name: str, elapsed_ms: float) -> None:
         """Record a ToolCallEvent for the current session."""
-        session = gate.get_or_create_session()  # type: ignore[union-attr]
+        assert gate is not None
+        session = gate.get_or_create_session()
         step = session.next_step()
         event = ToolCallEvent(
             session_id=session.id,
@@ -71,7 +72,7 @@ def patch_langgraph_tools(gate: Gate | None = None) -> None:
             latency_ms=elapsed_ms,
         )
         session.call_count += 1
-        gate.store.save_event(event)  # type: ignore[union-attr]
+        gate.store.save_event(event)
 
     # --- Current API: _execute_tool_sync + _execute_tool_async ---
     if hasattr(ToolNode, "_execute_tool_sync"):
@@ -121,9 +122,7 @@ def patch_langgraph_tools(gate: Gate | None = None) -> None:
         original_legacy = ToolNode._execute_tool
 
         @functools.wraps(original_legacy)
-        async def patched_legacy(
-            self_node: Any, tool_call: Any, *args: Any, **kwargs: Any
-        ) -> Any:
+        async def patched_legacy(self_node: Any, tool_call: Any, *args: Any, **kwargs: Any) -> Any:
             tool_name = _extract_tool_name(tool_call)
             start = time.perf_counter()
             try:
@@ -131,7 +130,7 @@ def patch_langgraph_tools(gate: Gate | None = None) -> None:
             finally:
                 _record_tool(tool_name, (time.perf_counter() - start) * 1000)
 
-        ToolNode._execute_tool = patched_legacy  # type: ignore[assignment]
+        ToolNode._execute_tool = patched_legacy
         register_patch(
             ToolNode,
             "_execute_tool",

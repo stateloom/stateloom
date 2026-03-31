@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,7 +13,7 @@ class ConsensusConfig:
     """Internal configuration passed from orchestrator to strategy."""
 
     prompt: str = ""
-    messages: list[dict] = field(default_factory=list)
+    messages: list[dict[str, Any]] = field(default_factory=list)
     models: list[str] = field(default_factory=list)
     rounds: int = 2
     strategy: str = "debate"

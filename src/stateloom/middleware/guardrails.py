@@ -49,10 +49,13 @@ class GuardrailMiddleware:
             config.guardrails.system_prompt_leak_threshold,
         )
         self._last_store_poll: float = 0.0
+        # When init() creates this middleware, code-level config is authoritative.
+        # Skip store sync so stale dashboard values don't overwrite init() settings.
+        self._config_from_init = True
 
     def _sync_from_store(self) -> None:
         """Poll persisted guardrails config from the store (cross-process sync)."""
-        if not self._store:
+        if not self._store or self._config_from_init:
             return
         now = time.monotonic()
         if now - self._last_store_poll < _STORE_POLL_INTERVAL:
@@ -178,7 +181,7 @@ class GuardrailMiddleware:
         return result
 
     @staticmethod
-    def _extract_user_text(messages: list[dict]) -> str:
+    def _extract_user_text(messages: list[dict[str, Any]]) -> str:
         """Extract text from the last few user messages for scanning."""
         parts: list[str] = []
         count = 0
@@ -205,7 +208,8 @@ class GuardrailMiddleware:
 
         logger.info(
             "Guardrail heuristic: %d match(es) in session=%s (rules: %s)",
-            len(matches), ctx.session.id,
+            len(matches),
+            ctx.session.id,
             ", ".join(m.pattern_name for m in matches),
         )
         enforce = self._config.guardrails.mode == GuardrailMode.ENFORCE
@@ -282,7 +286,11 @@ class GuardrailMiddleware:
             category="injection",
             severity=severity,
             score=round(score, 4),
-            action_taken=ActionTaken.BLOCKED if enforce and severity in ("high", "critical") else ActionTaken.LOGGED,
+            action_taken=(
+                ActionTaken.BLOCKED
+                if enforce and severity in ("high", "critical")
+                else ActionTaken.LOGGED
+            ),
             violation_text=text[:200],
             scan_phase="input",
             validator_type="nli",
@@ -302,7 +310,7 @@ class GuardrailMiddleware:
 
         return False
 
-    def _scan_local_model(self, messages: list[dict], ctx: MiddlewareContext) -> bool:
+    def _scan_local_model(self, messages: list[dict[str, Any]], ctx: MiddlewareContext) -> bool:
         """Run Llama-Guard validation. Returns True if blocked."""
         validator = self._get_local_validator()
         if validator is None:
@@ -314,7 +322,9 @@ class GuardrailMiddleware:
 
         logger.info(
             "Guardrail local model: unsafe detected in session=%s category=%s severity=%s",
-            ctx.session.id, result.category, result.severity,
+            ctx.session.id,
+            result.category,
+            result.severity,
         )
         enforce = self._config.guardrails.mode == GuardrailMode.ENFORCE
         event = GuardrailEvent(
@@ -371,7 +381,8 @@ class GuardrailMiddleware:
 
         logger.warning(
             "Guardrail output: system prompt leak detected in session=%s score=%.3f",
-            ctx.session.id, scan_result.score,
+            ctx.session.id,
+            scan_result.score,
         )
 
         event = GuardrailEvent(

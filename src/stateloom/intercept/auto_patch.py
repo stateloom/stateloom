@@ -90,9 +90,9 @@ def wrap_client(gate: Gate, client: Any) -> None:
         ("cohere", Provider.COHERE),
     ]:
         if keyword in client_module:
-            adapter = get_adapter(adapter_name)
-            if adapter:
-                wrap_instance(gate, adapter, client)
+            found_adapter = get_adapter(adapter_name)
+            if found_adapter:
+                wrap_instance(gate, found_adapter, client)
                 return
 
     logger.warning(

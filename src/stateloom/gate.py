@@ -8,10 +8,10 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from stateloom.core.config import LOCKABLE_SETTINGS, ComplianceProfile, PIIRule, StateLoomConfig
 from stateloom.core.context import (
@@ -45,7 +45,7 @@ from stateloom.core.observability_protocol import (
 from stateloom.core.organization import Organization, Team
 from stateloom.core.session import Session, SessionManager
 from stateloom.core.signals import Signal
-from stateloom.core.types import BudgetAction, JobStatus, PIIMode, SessionStatus
+from stateloom.core.types import BudgetAction, FailureAction, JobStatus, PIIMode, SessionStatus
 from stateloom.middleware.pipeline import Pipeline
 from stateloom.pricing.registry import PricingRegistry
 from stateloom.store.base import Store
@@ -148,7 +148,7 @@ class Gate:
         elif config.store_backend == "postgres":
             from stateloom.store.postgres_store import PostgresStore
 
-            self.store = PostgresStore(
+            self.store = PostgresStore(  # type: ignore[assignment]
                 url=config.store_postgres_url,
                 pool_min=config.store_postgres_pool_min,
                 pool_max=config.store_postgres_pool_max,
@@ -164,6 +164,9 @@ class Gate:
                 stored = self.store.get_secret(f"provider_key_{provider}")
                 if stored:
                     setattr(self.config, field, stored)
+
+        # Load persisted local routing config (dashboard settings survive re-init)
+        self._load_local_routing_config()
 
         # Register builtin adapters (idempotent — needed for Client.chat() routing)
         from stateloom.intercept.provider_registry import register_builtin_adapters
@@ -217,36 +220,18 @@ class Gate:
         )
 
     def _validate_config(self) -> None:
-        """Validate v4 config requirements at startup.
-
-        Security middleware (PII block rules, budget hard stops) must have
-        explicit on_middleware_failure set. If missing, the SDK refuses to start.
+        """Auto-default on_middleware_failure to 'block' (fail-closed) for
+        security-critical config that doesn't specify it explicitly.
         """
-        errors: list[str] = []
-
         for rule in self.config.pii.rules:
             if rule.mode == PIIMode.BLOCK and rule.on_middleware_failure is None:
-                errors.append(
-                    f"PII rule '{rule.pattern}' has mode=block but no on_middleware_failure. "
-                    f"Set on_middleware_failure='block' or 'pass' explicitly."
-                )
+                rule.on_middleware_failure = FailureAction.BLOCK
 
         if (
             self.config.budget_action == BudgetAction.HARD_STOP
-            and (self.config.budget_per_session or self.config.budget_global)
             and self.config.budget_on_middleware_failure is None
         ):
-            errors.append(
-                "Budget has action=hard_stop but no on_middleware_failure. "
-                "Set budget_on_middleware_failure='block' or 'pass' explicitly."
-            )
-
-        if errors:
-            msg = "StateLoom config validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
-            raise StateLoomError(
-                msg,
-                details="Security middleware requires explicit on_middleware_failure config.",
-            )
+            self.config.budget_on_middleware_failure = FailureAction.BLOCK
 
     def _define_features(self) -> None:
         """Define all features with their tier (community / enterprise)."""
@@ -276,14 +261,18 @@ class Gate:
             "consensus_advanced",
             tier="enterprise",
             description=(
-                "Advanced consensus: >3 models, judge synthesis,"
-                " greedy downgrade, durable replay"
+                "Advanced consensus: >3 models, judge synthesis, greedy downgrade, durable replay"
             ),
         )
         r.define(
             "model_testing",
             tier="enterprise",
             description="Runtime model testing configuration (shadow drafting)",
+        )
+        r.define(
+            "model_override",
+            tier="enterprise",
+            description="Emergency model override (force all traffic to a specific model)",
         )
 
     def _create_pipeline(self) -> Pipeline:
@@ -426,9 +415,9 @@ class Gate:
             )
             self._audit_hook_manager.install()
 
-    def security_status(self) -> dict:
+    def security_status(self) -> dict[str, Any]:
         """Get security engine status (audit hooks + vault)."""
-        result: dict = {
+        result: dict[str, Any] = {
             "audit_hooks": {"installed": False, "enabled": False},
             "secret_vault": {"enabled": False},
         }
@@ -438,7 +427,7 @@ class Gate:
             result["secret_vault"] = self._secret_vault.get_status()
         return result
 
-    def shadow_status(self) -> dict:
+    def shadow_status(self) -> dict[str, Any]:
         """Get model testing (shadow drafting) status. Ungated — read-only."""
         try:
             from stateloom.cache.semantic import is_semantic_available
@@ -455,8 +444,7 @@ class Gate:
             "similarity_method": self.config.shadow_similarity_method,
             "semantic_available": semantic_available,
             "middleware_active": (
-                hasattr(self, "_shadow_middleware")
-                and self._shadow_middleware is not None
+                hasattr(self, "_shadow_middleware") and self._shadow_middleware is not None
             ),
         }
 
@@ -468,7 +456,7 @@ class Gate:
         sample_rate: float | None = None,
         max_context_tokens: int | None = None,
         models: list[str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Configure model testing (shadow drafting) at runtime. Enterprise-gated."""
         self._feature_registry.require("model_testing")
         if model is not None:
@@ -536,10 +524,12 @@ class Gate:
                     model_name=self.config.auto_route.semantic_model,
                 )
                 self._shared_semantic_classifier = shared_classifier
-                self.pipeline.add(PrecomputeMiddleware(
-                    shared_classifier,
-                    compliance_fn=self._get_compliance_profile,
-                ))
+                self.pipeline.add(
+                    PrecomputeMiddleware(
+                        shared_classifier,
+                        compliance_fn=self._get_compliance_profile,
+                    )
+                )
             except Exception:
                 logger.debug("PrecomputeMiddleware init failed", exc_info=True)
 
@@ -613,7 +603,7 @@ class Gate:
             except ImportError:
                 logger.debug("Cache middleware not available")
 
-        if self.config.loop_exact_threshold > 0:
+        if self.config.loop_detection_enabled and self.config.loop_exact_threshold > 0:
             try:
                 from stateloom.middleware.loop_detector import LoopDetector
 
@@ -686,6 +676,32 @@ class Gate:
 
     # --- Hierarchy methods ---
 
+    def _load_local_routing_config(self) -> None:
+        """Load persisted local routing config from the store.
+
+        Dashboard settings (force-local, active model, auto-route enabled)
+        are persisted to the store so they survive ``init()`` re-creation.
+        Only applied when the user didn't explicitly set these in ``init()``.
+        """
+        import json
+
+        try:
+            blob = self.store.get_secret("local_routing_config_json")
+            if not blob:
+                return
+            data = json.loads(blob)
+            # Only apply if the user didn't explicitly set these in init()
+            if not self.config.auto_route_force_local and data.get("auto_route_force_local"):
+                self.config.auto_route_force_local = True
+            if not self.config.auto_route_enabled and data.get("auto_route_enabled"):
+                self.config.auto_route_enabled = True
+            if not self.config.local_model_default and data.get("local_model_default"):
+                self.config.local_model_default = data["local_model_default"]
+            if not self.config.local_model_enabled and data.get("local_model_enabled"):
+                self.config.local_model_enabled = True
+        except Exception:
+            logger.debug("Failed to load local routing config from store", exc_info=True)
+
     def _load_hierarchy(self) -> None:
         """Load orgs/teams/agents from store into in-memory caches."""
         try:
@@ -756,19 +772,19 @@ class Gate:
         """
         import os
 
-        _ENV_KEYS = {
+        env_keys = {
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
             "google": "GOOGLE_API_KEY",
         }
-        _CFG_KEYS = {
+        cfg_keys = {
             "openai": self.config.provider_api_key_openai,
             "anthropic": self.config.provider_api_key_anthropic,
             "google": self.config.provider_api_key_google,
         }
         keys: dict[str, str] = {}
-        for provider, cfg_val in _CFG_KEYS.items():
-            val = cfg_val or os.environ.get(_ENV_KEYS[provider], "")
+        for provider, cfg_val in cfg_keys.items():
+            val = cfg_val or os.environ.get(env_keys[provider], "")
             if val:
                 keys[provider] = val
         return keys
@@ -867,7 +883,7 @@ class Gate:
 
     def lock_setting(
         self, setting: str, value: Any = None, *, locked_by: str = "", reason: str = ""
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Lock a config setting at its current (or specified) value."""
         import json as json_mod
 
@@ -895,11 +911,11 @@ class Gate:
         self.store.delete_admin_lock(setting)
         return True
 
-    def list_locked_settings(self) -> list[dict]:
+    def list_locked_settings(self) -> list[dict[str, Any]]:
         """Return all admin-locked settings with metadata."""
         return self.store.list_admin_locks()
 
-    def check_locked_settings(self, config_kwargs: dict) -> None:
+    def check_locked_settings(self, config_kwargs: dict[str, Any]) -> None:
         """Check if any kwargs conflict with admin-locked settings. Raises on conflict."""
         import json as json_mod
 
@@ -917,7 +933,7 @@ class Gate:
     def create_agent(
         self,
         slug: str,
-        team_id: str,
+        team_id: str = "",
         *,
         name: str = "",
         description: str = "",
@@ -991,7 +1007,7 @@ class Gate:
         team_id: str | None = None,
         org_id: str | None = None,
         status: str | None = None,
-    ) -> list:
+    ) -> list[Any]:
         """List agents, optionally filtered."""
         return self.store.list_agents(team_id=team_id, org_id=org_id, status=status)
 
@@ -1414,11 +1430,22 @@ class Gate:
             self.pipeline.notify_session_end(session.id)
             set_current_session(previous_session)
 
-    def get_or_create_session(self) -> Session:
-        """Get the current session or create a default one."""
+    def get_or_create_session(
+        self,
+        *,
+        provider: str = "",
+    ) -> Session:
+        """Get the current session or create a default one.
+
+        When *provider* is given, the implicit session ID is
+        ``default-{provider}`` so that different providers land in
+        separate sessions.
+        """
         session = get_current_session()
         if session is None:
-            session = self.session_manager.get_or_create("default")
+            _prov = getattr(provider, "value", provider) or ""
+            session_id = f"default-{_prov}" if _prov else "default"
+            session = self.session_manager.get_or_create(session_id)
             set_current_session(session)
             self.store.save_session(session)
         return session
@@ -1685,7 +1712,7 @@ class Gate:
         self.store.save_event(event)
         return True
 
-    def circuit_breaker_status(self) -> dict:
+    def circuit_breaker_status(self) -> dict[str, Any]:
         """Get circuit breaker status for all tracked providers."""
         if self._circuit_breaker is None:
             return {"enabled": False, "providers": {}}
@@ -1696,7 +1723,7 @@ class Gate:
         """Reset a provider's circuit breaker to closed."""
         if self._circuit_breaker is None:
             return False
-        return self._circuit_breaker.reset(provider)
+        return cast(bool, self._circuit_breaker.reset(provider))
 
     def set_custom_scorer(self, scorer: Any) -> None:
         """Set or clear the custom routing scorer callback."""
@@ -1742,7 +1769,7 @@ class Gate:
         mutates_state: bool = False,
         name: str | None = None,
         session_root: bool = False,
-    ):
+    ) -> Callable[..., Any]:
         """Decorator for tool functions (sync and async).
 
         Enables tool execution visibility, safe replay, and loop detection.
@@ -1756,13 +1783,13 @@ class Gate:
                 each invocation. Eliminates the need for ``with stateloom.session()``.
         """
 
-        def decorator(func):
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             tool_name = name or func.__name__
 
             if inspect.iscoroutinefunction(func):
 
                 @functools.wraps(func)
-                async def async_wrapper(*args, **kwargs):
+                async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                     previous_session = None
 
                     if session_root:
@@ -1828,7 +1855,7 @@ class Gate:
                 return async_wrapper
 
             @functools.wraps(func)
-            def sync_wrapper(*args, **kwargs):
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 previous_session = None
 
                 if session_root:
@@ -1911,7 +1938,7 @@ class Gate:
         mock_until_step: int,
         strict: bool = True,
         allow_hosts: list[str] | None = None,
-    ) -> None:
+    ) -> Any:
         """Time-travel debugging: replay a session, mocking until step N.
 
         Args:
@@ -1919,6 +1946,11 @@ class Gate:
             mock_until_step: Mock steps 1 through N with cached responses.
             strict: If True, block outbound HTTP calls not captured via @gate.tool().
             allow_hosts: Hosts to allow through the network blocker in strict mode.
+
+        Returns:
+            The ``ReplayEngine`` instance (also a context manager). Call
+            ``engine.stop()`` when done to clean up ContextVars, or use
+            as ``with gate.replay(...) as engine:``.
         """
         from stateloom.replay.engine import ReplayEngine
 
@@ -1930,6 +1962,7 @@ class Gate:
             allow_hosts=allow_hosts,
         )
         engine.start()
+        return engine
 
     def share(self, session: str) -> str:
         """Share a session for collaborative debugging.
@@ -2108,16 +2141,16 @@ class Gate:
     def list_dead_jobs(self, limit: int = 100) -> list[Job]:
         """List jobs in the dead letter queue."""
         if self._job_processor is not None:
-            return self._job_processor.queue.list_dead(limit)
+            return cast(list[Job], self._job_processor.queue.list_dead(limit))
         return self.store.list_jobs(status="dead", limit=limit)
 
     def requeue_dead_job(self, job_id: str) -> bool:
         """Manually requeue a dead job for retry."""
         if self._job_processor is not None:
-            return self._job_processor.queue.requeue_dead(job_id)
+            return cast(bool, self._job_processor.queue.requeue_dead(job_id))
         return False
 
-    def job_stats(self) -> dict:
+    def job_stats(self) -> dict[str, Any]:
         """Get aggregate job statistics."""
         return self.store.get_job_stats()
 
@@ -2180,9 +2213,7 @@ class Gate:
                 "greedy_agreement_threshold", defaults.greedy_agreement_threshold
             ),
             early_stop_enabled=kwargs.get("early_stop_enabled", defaults.early_stop_enabled),
-            early_stop_threshold=kwargs.get(
-                "early_stop_threshold", defaults.early_stop_threshold
-            ),
+            early_stop_threshold=kwargs.get("early_stop_threshold", defaults.early_stop_threshold),
             temperature=kwargs.get("temperature", 0.7),
             samples=kwargs.get("samples", 5),
             judge_model=kwargs.get("judge_model"),
@@ -2201,8 +2232,7 @@ class Gate:
 
         if not ee_available:
             ee_hint = (
-                "Set STATELOOM_LICENSE_KEY or use STATELOOM_ENV=development "
-                "for local development."
+                "Set STATELOOM_LICENSE_KEY or use STATELOOM_ENV=development for local development."
             )
             if len(config.models) > 3:
                 raise StateLoomFeatureError(

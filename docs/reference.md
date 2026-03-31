@@ -106,7 +106,7 @@
 - **Authentication & RBAC** — unified role-based access control with local email/password auth, JWT tokens, OIDC federation (Google, Okta, etc.), and a five-tier role hierarchy (`org_admin`, `org_auditor`, `team_admin`, `team_editor`, `team_viewer`). Optional — disabled by default
 - **VK scope enforcement** — restrict virtual keys to specific proxy endpoints (`chat`, `messages`, `responses`, `generate`, `agents`). Empty scopes = all allowed (backward compatible)
 - **End-user attribution** — track downstream users via `X-StateLoom-End-User` header. Sanitized, stored as a first-class session field, filterable in dashboard
-- **Local dashboard** — live session viewer + REST API + WebSocket at localhost:4781
+- **Local dashboard** — live session viewer + REST API + WebSocket at localhost:4782
 
 ## Quick Start
 
@@ -711,18 +711,18 @@ Per-team TPS (Transactions Per Second) limits with priority-aware request queuei
 
 ```bash
 # Set rate limit for a team (2 TPS, priority 10, max 50 queued, 15s timeout)
-curl -X PUT localhost:4781/api/teams/team-123/rate-limit \
+curl -X PUT localhost:4782/api/teams/team-123/rate-limit \
   -H 'Content-Type: application/json' \
   -d '{"rate_limit_tps": 2, "rate_limit_priority": 10, "rate_limit_max_queue": 50, "rate_limit_queue_timeout": 15}'
 
 # Check rate limit config and live status
-curl localhost:4781/api/teams/team-123/rate-limit
+curl localhost:4782/api/teams/team-123/rate-limit
 
 # Remove rate limit (unlimited)
-curl -X DELETE localhost:4781/api/teams/team-123/rate-limit
+curl -X DELETE localhost:4782/api/teams/team-123/rate-limit
 
 # Global rate limiter status across all teams
-curl localhost:4781/api/rate-limiter
+curl localhost:4782/api/rate-limiter
 ```
 
 ### Configuration via Python
@@ -762,7 +762,7 @@ stateloom.init(proxy_enabled=True)
 
 # Client side — any language, any SDK
 import openai
-client = openai.OpenAI(base_url="http://localhost:4781/v1", api_key="ag-...")
+client = openai.OpenAI(base_url="http://localhost:4782/v1", api_key="ag-...")
 response = client.chat.completions.create(
     model="gpt-4o",
     messages=[{"role": "user", "content": "Hello!"}],
@@ -796,7 +796,7 @@ stateloom.revoke_virtual_key(key_info["id"])
 Users can pass their own provider API keys via headers. StateLoom still tracks the session and enforces all middleware (PII, budget, rate limiting), but uses the caller's key for the actual LLM call.
 
 ```bash
-curl http://localhost:4781/v1/chat/completions \
+curl http://localhost:4782/v1/chat/completions \
   -H "Authorization: Bearer ag-..." \
   -H "X-StateLoom-OpenAI-Key: sk-my-personal-key" \
   -H "Content-Type: application/json" \
@@ -864,7 +864,7 @@ agent = stateloom.create_agent(
 Or via the dashboard API:
 
 ```bash
-curl -X POST localhost:4781/api/agents \
+curl -X POST localhost:4782/api/agents \
   -H 'Content-Type: application/json' \
   -d '{
     "slug": "legal-bot",
@@ -879,7 +879,7 @@ curl -X POST localhost:4781/api/agents \
 ### Call the agent
 
 ```bash
-curl http://localhost:4781/v1/agents/legal-bot/chat/completions \
+curl http://localhost:4782/v1/agents/legal-bot/chat/completions \
   -H "Authorization: Bearer ag-..." \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "What is force majeure?"}]}'
@@ -908,7 +908,7 @@ stateloom.activate_agent_version(agent.id, agent.active_version_id)
 Virtual keys can be restricted to specific agents:
 
 ```bash
-curl -X POST localhost:4781/api/virtual-keys \
+curl -X POST localhost:4782/api/virtual-keys \
   -H 'Content-Type: application/json' \
   -d '{"team_id": "team-1", "name": "legal-only", "agent_ids": ["agt-abc123"]}'
 ```
@@ -925,12 +925,12 @@ A key with `agent_ids` set can only access the listed agents. An empty list allo
 
 ```python
 # Pause via dashboard API
-curl -X PATCH localhost:4781/api/agents/legal-bot?team_id=team-1 \
+curl -X PATCH localhost:4782/api/agents/legal-bot?team_id=team-1 \
   -H 'Content-Type: application/json' \
   -d '{"status": "paused"}'
 
 # Archive (soft delete)
-curl -X DELETE localhost:4781/api/agents/legal-bot?team_id=team-1
+curl -X DELETE localhost:4782/api/agents/legal-bot?team_id=team-1
 ```
 
 ## File-Based Prompt Versioning
@@ -1412,7 +1412,7 @@ with stateloom.session("parent-task", org_id="org-1", team_id="team-1") as paren
 List child sessions via the API:
 
 ```bash
-curl localhost:4781/api/sessions/parent-task/children
+curl localhost:4782/api/sessions/parent-task/children
 ```
 
 ## Session Timeouts & Heartbeats
@@ -1444,7 +1444,7 @@ with stateloom.session("long-task") as s:
 stateloom.cancel_session("long-task")
 
 # Or via the dashboard API
-# curl -X POST localhost:4781/api/sessions/long-task/cancel
+# curl -X POST localhost:4782/api/sessions/long-task/cancel
 ```
 
 ## Session Suspension (Human-in-the-Loop)
@@ -1571,7 +1571,7 @@ with stateloom.session(name="content-pipeline") as s:
 The breakdown is available in the dashboard REST API:
 
 ```bash
-curl localhost:4781/api/sessions/{id} | jq '.cost_by_model'
+curl localhost:4782/api/sessions/{id} | jq '.cost_by_model'
 ```
 
 Durable replay works across models — cached responses are stored per-step regardless of which model produced them.
@@ -1753,17 +1753,17 @@ Solo developers are `org_admin` of a "Default Organization" — same system, no 
 
 ```bash
 # Login
-curl -X POST localhost:4781/api/v1/auth/login \
+curl -X POST localhost:4782/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email": "admin@example.com", "password": "..."}'
 # Returns: { "access_token": "...", "refresh_token": "...", "user": {...} }
 
 # Use the token
-curl localhost:4781/api/sessions \
+curl localhost:4782/api/sessions \
   -H 'Authorization: Bearer <access_token>'
 
 # CLI login
-stateloom login --host 127.0.0.1 --port 4781
+stateloom login --host 127.0.0.1 --port 4782
 ```
 
 ### OIDC federation (SSO)
@@ -1772,7 +1772,7 @@ Connect to Google Workspace, Okta, Azure AD, or any OIDC provider:
 
 ```bash
 # Register a provider (org_admin only)
-curl -X POST localhost:4781/api/v1/oidc/providers \
+curl -X POST localhost:4782/api/v1/oidc/providers \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -1817,7 +1817,7 @@ Empty scopes = all allowed (backward compatible). Non-matching scope returns 403
 Track which downstream user made each request:
 
 ```bash
-curl http://localhost:4781/v1/chat/completions \
+curl http://localhost:4782/v1/chat/completions \
   -H "Authorization: Bearer ag-..." \
   -H "X-StateLoom-End-User: user@example.com" \
   -H "Content-Type: application/json" \
@@ -1827,7 +1827,7 @@ curl http://localhost:4781/v1/chat/completions \
 The header is sanitized (non-printable chars stripped, 256 char max), stored on the session's `end_user` field, and stripped before upstream forwarding. Filter sessions by end-user in the dashboard:
 
 ```bash
-curl "localhost:4781/api/sessions?end_user=user@example.com"
+curl "localhost:4782/api/sessions?end_user=user@example.com"
 ```
 
 ### Backward compatibility
@@ -2065,7 +2065,7 @@ When StateLoom runs across multiple processes (e.g., a dashboard server and an S
 
 ## Dashboard
 
-Starts automatically at `localhost:4781` (disable with `dashboard=False`).
+Starts automatically at `localhost:4782` (disable with `dashboard=False`).
 
 ### REST API
 
@@ -2319,7 +2319,7 @@ Starts automatically at `localhost:4781` (disable with `dashboard=False`).
 | `GET /api/observability/latency` | Latency percentile data |
 | `GET /api/observability/breakdown` | Metrics breakdown by model/provider |
 
-Real-time event streaming is available via WebSocket at `ws://localhost:4781/ws`.
+Real-time event streaming is available via WebSocket at `ws://localhost:4782/ws`.
 
 ## Configuration
 
@@ -2333,7 +2333,7 @@ stateloom.init(
     pii=False,
     pii_rules=[],
     dashboard=True,
-    dashboard_port=4781,
+    dashboard_port=4782,
     console_output=True,
     fail_open=True,
     store_backend="sqlite",  # or "memory" or "postgres"
@@ -2381,7 +2381,7 @@ config = StateLoomConfig.from_yaml("stateloom.yaml")
 | Option | Default | Description |
 |--------|---------|-------------|
 | `dashboard` | `True` | Start dashboard server |
-| `dashboard_port` | `4781` | Dashboard port |
+| `dashboard_port` | `4782` | Dashboard port |
 | `dashboard_host` | `"127.0.0.1"` | Dashboard bind address |
 | `dashboard_api_key` | `""` | API key for dashboard authentication |
 

@@ -238,6 +238,9 @@ def _import_node(
         try:
             # Remap session_id on event to match (possibly remapped) session
             event_dict["session_id"] = new_id
+            # Generate a new event ID to avoid overwriting the original
+            # events via INSERT OR REPLACE on the UUID primary key.
+            event_dict["id"] = str(uuid.uuid4())
             event = _event_adapter.validate_python(event_dict)
             events.append(event)
         except Exception:

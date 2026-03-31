@@ -193,6 +193,9 @@ class TestProtocolRuntimeCheck:
             def extract_confidence(self, text):
                 return None
 
+            def rebuild_call_args(self, normalized_kwargs, original_args, original_kwargs):
+                return original_args, normalized_kwargs
+
             def prepare_chat(self, *, model, messages, provider_keys=None, **kwargs):
                 raise NotImplementedError
 

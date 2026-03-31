@@ -9,13 +9,14 @@ from __future__ import annotations
 import json
 import logging
 import time
+from typing import Any, cast
 
 from stateloom.cache.base import CacheEntry
 
 logger = logging.getLogger("stateloom.cache.redis_store")
 
 try:
-    import redis as redis_lib
+    import redis as redis_lib  # type: ignore[import-not-found]
 
     _REDIS_AVAILABLE = True
 except ImportError:
@@ -125,7 +126,7 @@ class RedisCacheStore:
         return len(expired_hashes)
 
     def size(self) -> int:
-        return self._redis.zcard(_INDEX_KEY)
+        return cast(int, self._redis.zcard(_INDEX_KEY))
 
     def clear(self) -> None:
         # Get all hashes in the index
@@ -174,7 +175,7 @@ class RedisCacheStore:
 
     # --- Internal helpers ---
 
-    def _data_to_entry(self, request_hash: str, data: dict) -> CacheEntry:
+    def _data_to_entry(self, request_hash: str, data: dict[str, Any]) -> CacheEntry:
         """Convert a Redis hash dict to a CacheEntry."""
         embedding = None
         embedding_raw = data.get("embedding_json", "")

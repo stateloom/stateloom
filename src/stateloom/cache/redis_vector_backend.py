@@ -7,16 +7,20 @@ enabling shared semantic cache across multiple nodes in a cluster.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 logger = logging.getLogger("stateloom.cache.redis_vector_backend")
 
 # Guard optional dependencies
 try:
     import numpy as np
-    import redis
-    from redis.commands.search.field import TagField, VectorField
-    from redis.commands.search.indexDefinition import IndexDefinition, IndexType
-    from redis.commands.search.query import Query
+    import redis  # type: ignore[import-not-found]
+    from redis.commands.search.field import TagField, VectorField  # type: ignore[import-not-found]
+    from redis.commands.search.indexDefinition import (  # type: ignore[import-not-found]
+        IndexDefinition,
+        IndexType,
+    )
+    from redis.commands.search.query import Query  # type: ignore[import-not-found]
 
     _REDIS_VECTOR_AVAILABLE = True
 except ImportError:
@@ -70,7 +74,7 @@ class RedisVectorBackend:
             )
             self._client.ft(self._index_name).create_index(schema, definition=definition)
 
-    def add(self, entry_id: str, embedding: list[float], metadata: dict) -> None:
+    def add(self, entry_id: str, embedding: list[float], metadata: dict[str, Any]) -> None:
         key = f"{self._prefix}{entry_id}"
         vec_bytes = np.array(embedding, dtype=np.float32).tobytes()
         self._client.hset(
@@ -126,7 +130,7 @@ class RedisVectorBackend:
             if cursor == 0:
                 break
 
-    def rebuild(self, entries: list[tuple[str, list[float], dict]]) -> None:
+    def rebuild(self, entries: list[tuple[str, list[float], dict[str, Any]]]) -> None:
         self.reset()
         if not entries:
             return

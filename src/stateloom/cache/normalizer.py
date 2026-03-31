@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import re
+from typing import Any
 
 _DEFAULT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
@@ -52,7 +53,7 @@ class RequestNormalizer:
             for p in custom_patterns:
                 self._patterns.append(("custom", re.compile(p)))
 
-    def normalize_kwargs(self, kwargs: dict) -> dict:
+    def normalize_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Return a deep copy with message content normalized.
 
         Only touches content fields — model, role, temperature, etc.

@@ -15,7 +15,7 @@ def test_default_config():
     assert config.auto_patch is True
     assert config.fail_open is True
     assert config.dashboard is True
-    assert config.dashboard_port == 4781
+    assert config.dashboard_port == 4782
     assert config.budget_per_session is None
     assert config.pii_enabled is False
     assert config.cache_enabled is True

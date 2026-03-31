@@ -104,7 +104,8 @@ def resolve_session_id(
     return f"proxy-{uuid.uuid4().hex[:12]}"
 
 
-# Well-known User-Agent patterns → friendly client names
+# Well-known User-Agent patterns → friendly client names.
+# Specific SDK/CLI tools that identify the actual caller:
 _UA_PATTERNS: list[tuple[str, str]] = [
     ("claude-code/", "Claude Code"),
     ("claude-cli/", "Claude CLI"),
@@ -112,28 +113,43 @@ _UA_PATTERNS: list[tuple[str, str]] = [
     ("claudedesktop/", "Claude Desktop"),
     ("codex/", "Codex CLI"),
     ("OpenAI/", "OpenAI SDK"),
-    ("python-requests/", "Python Requests"),
-    ("node-fetch/", "Node Fetch"),
-    ("axios/", "Axios"),
-    ("curl/", "curl"),
-    ("httpx/", "httpx"),
     ("GeminiCLI/", "Gemini CLI"),
     ("Gemini-API/", "Gemini SDK"),
     ("google-api-python-client/", "Google API Client"),
+]
+
+# Generic HTTP libraries — matched but NOT used as the session name.
+# When a generic client is detected, we prefer the provider name
+# (e.g. "Gemini" instead of "httpx").
+_GENERIC_UA_PATTERNS: list[str] = [
+    "python-requests/",
+    "node-fetch/",
+    "axios/",
+    "curl/",
+    "httpx/",
 ]
 
 
 def derive_session_name(request: Request, model: str, provider: str) -> str:
     """Derive a short session name from the client User-Agent.
 
-    Returns a name like "Claude Code" or "curl".
+    Returns a name like "Claude Code" or "Gemini".
+    Specific SDK/CLI clients get their own name; generic HTTP libraries
+    fall through to the provider name.
     """
     ua = request.headers.get("user-agent", "")
+    ua_lower = ua.lower()
+
+    # Check specific SDK/CLI clients first
     for pattern, name in _UA_PATTERNS:
-        if pattern.lower() in ua.lower():
+        if pattern.lower() in ua_lower:
             return name
 
-    # Fallback: first product token from UA, or provider name
+    # Provider name is more useful than a generic HTTP library name
+    if provider:
+        return provider.capitalize()
+
+    # Fallback: first product token from UA
     if ua:
         return ua.split("/")[0].split(" ")[0][:30]
-    return provider.capitalize() if provider else "Proxy"
+    return "Proxy"

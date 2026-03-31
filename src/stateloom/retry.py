@@ -19,7 +19,6 @@ from stateloom.core.errors import (
     StateLoomBudgetError,
     StateLoomCancellationError,
     StateLoomComplianceError,
-    StateLoomError,
     StateLoomGuardrailError,
     StateLoomKillSwitchError,
     StateLoomPIIBlockedError,
@@ -299,7 +298,7 @@ def durable_task(
     name: str | None = None,
     budget: float | None = None,
     on_retry: Callable[[int, Exception], None] | None = None,
-) -> Callable:
+) -> Callable[..., Any]:
     """Decorator: durable session + automatic retry on exception.
 
     Creates a single durable session that spans all retry attempts.
@@ -317,7 +316,7 @@ def durable_task(
         on_retry: Optional callback(attempt_number, error) on each retry.
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         task_name = name or func.__name__
 
         if inspect.iscoroutinefunction(func):
@@ -358,9 +357,9 @@ def durable_task(
 
 
 def _run_durable_task_sync(
-    func: Callable,
-    args: tuple,
-    kwargs: dict,
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     retries: int,
     validate: Callable[[Any], bool] | None,
@@ -439,9 +438,9 @@ def _run_durable_task_sync(
 
 
 async def _run_durable_task_async(
-    func: Callable,
-    args: tuple,
-    kwargs: dict,
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     *,
     retries: int,
     validate: Callable[[Any], bool] | None,

@@ -65,7 +65,7 @@ class Store(Protocol):
         """Get events for a session, optionally filtered by type."""
         ...
 
-    def get_global_stats(self) -> dict:
+    def get_global_stats(self) -> dict[str, Any]:
         """Get global statistics (total cost, calls, savings, etc.)."""
         ...
 
@@ -179,7 +179,7 @@ class Store(Protocol):
         """Delete a job. Returns True if it existed."""
         ...
 
-    def get_job_stats(self) -> dict:
+    def get_job_stats(self) -> dict[str, Any]:
         """Get aggregate job statistics."""
         ...
 
@@ -195,11 +195,11 @@ class Store(Protocol):
 
     # --- Hierarchy queries ---
 
-    def get_org_stats(self, org_id: str) -> dict:
+    def get_org_stats(self, org_id: str) -> dict[str, Any]:
         """Get aggregated stats for an organization from its sessions."""
         ...
 
-    def get_team_stats(self, team_id: str) -> dict:
+    def get_team_stats(self, team_id: str) -> dict[str, Any]:
         """Get aggregated stats for a team from its sessions."""
         ...
 
@@ -274,11 +274,11 @@ class Store(Protocol):
         """Persist an admin lock for a config setting."""
         ...
 
-    def get_admin_lock(self, setting: str) -> dict | None:
+    def get_admin_lock(self, setting: str) -> dict[str, Any] | None:
         """Get an admin lock by setting name. Returns dict or None."""
         ...
 
-    def list_admin_locks(self) -> list[dict]:
+    def list_admin_locks(self) -> list[dict[str, Any]]:
         """List all admin-locked settings."""
         ...
 
@@ -357,7 +357,7 @@ class Store(Protocol):
         """Persist a refresh token record."""
         ...
 
-    def get_refresh_token(self, token_hash: str) -> dict | None:
+    def get_refresh_token(self, token_hash: str) -> dict[str, Any] | None:
         """Get a refresh token by its hash. Returns dict or None."""
         ...
 
@@ -389,4 +389,14 @@ class Store(Protocol):
 
     def delete_oidc_provider(self, provider_id: str) -> bool:
         """Delete an OIDC provider. Returns True if deleted."""
+        ...
+
+    # --- Secret methods ---
+
+    def save_secret(self, key: str, value: str) -> None:
+        """Persist a secret key-value pair."""
+        ...
+
+    def get_secret(self, key: str) -> str:
+        """Get a secret by key. Returns empty string if not found."""
         ...

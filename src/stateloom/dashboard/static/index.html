@@ -196,14 +196,15 @@
             <div class="section-header"><h3>Cloud</h3></div>
 
             <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-label">Default Model</div>
+                <div class="stat-card" id="model-override-card">
+                    <div class="stat-label">Emergency Model Override</div>
                     <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
                         <select id="models-default-model" class="select-model" onchange="saveDefaultModel()" style="flex:1;min-width:0;">
                             <option value="">None</option>
                         </select>
                         <span class="save-flash" id="flash-default-model">Saved!</span>
                     </div>
+                    <div id="model-override-lock" style="display:none;font-size:11px;color:var(--text-secondary);margin-top:6px;">Requires enterprise license</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Total Cloud Spend</div>
@@ -1793,6 +1794,15 @@
 
             <div class="settings-section">
                 <h3>Loop Detection</h3>
+                <div class="settings-row">
+                    <span class="settings-label">Enabled</span>
+                    <span class="settings-value">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settings-loop-enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </span>
+                </div>
                 <div class="settings-row">
                     <span class="settings-label">Exact Threshold</span>
                     <span class="settings-value">

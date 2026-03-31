@@ -13,7 +13,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stateloom.core.config import ComplianceProfile, PIIRule
 from stateloom.core.event import (
@@ -40,9 +40,9 @@ from stateloom.experiment.models import (
 )
 
 try:
-    import psycopg
-    from psycopg.rows import dict_row
-    from psycopg_pool import ConnectionPool
+    import psycopg  # type: ignore[import-not-found]  # noqa: F401
+    from psycopg.rows import dict_row  # type: ignore[import-not-found]
+    from psycopg_pool import ConnectionPool  # type: ignore[import-not-found]
 
     _PSYCOPG_AVAILABLE = True
 except ImportError:
@@ -50,8 +50,6 @@ except ImportError:
 
 if TYPE_CHECKING:
     from stateloom.agent.models import Agent, AgentVersion
-    from stateloom.auth.models import User, UserTeamRole
-    from stateloom.auth.oidc_models import OIDCProvider
     from stateloom.proxy.virtual_key import VirtualKey
 
 logger = logging.getLogger("stateloom.store.postgres")
@@ -318,7 +316,8 @@ _SCHEMA_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sessions_team ON sessions(team_id)",
     "CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)",
     "CREATE INDEX IF NOT EXISTS idx_experiments_status ON experiments(status)",
-    "CREATE INDEX IF NOT EXISTS idx_assignments_experiment ON experiment_assignments(experiment_id)",
+    "CREATE INDEX IF NOT EXISTS idx_assignments_experiment"
+    " ON experiment_assignments(experiment_id)",
     "CREATE INDEX IF NOT EXISTS idx_teams_org ON teams(org_id)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)",
@@ -725,7 +724,7 @@ class PostgresStore:
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_event(r) for r in rows]
 
-    def get_global_stats(self) -> dict:
+    def get_global_stats(self) -> dict[str, Any]:
         with self._pool.connection() as conn:
             row = conn.execute(
                 """SELECT
@@ -769,7 +768,7 @@ class PostgresStore:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         with self._pool.connection() as conn:
             cursor = conn.execute("DELETE FROM events WHERE timestamp < %s", (cutoff,))
-            deleted = cursor.rowcount
+            deleted = cast(int, cursor.rowcount)
             conn.execute(
                 "DELETE FROM sessions WHERE ended_at IS NOT NULL AND ended_at < %s",
                 (cutoff,),
@@ -795,7 +794,7 @@ class PostgresStore:
                     "  WHERE status IN ('completed', 'error', 'budget_exceeded', 'loop_killed')"
                     ")",
                 )
-            updated = cursor.rowcount
+            updated = cast(int, cursor.rowcount)
             conn.commit()
             return updated
 
@@ -1167,7 +1166,7 @@ class PostgresStore:
 
     # --- Hierarchy queries ---
 
-    def get_org_stats(self, org_id: str) -> dict:
+    def get_org_stats(self, org_id: str) -> dict[str, Any]:
         with self._pool.connection() as conn:
             row = conn.execute(
                 """SELECT
@@ -1185,7 +1184,7 @@ class PostgresStore:
             result["org_id"] = org_id
             return result
 
-    def get_team_stats(self, team_id: str) -> dict:
+    def get_team_stats(self, team_id: str) -> dict[str, Any]:
         with self._pool.connection() as conn:
             row = conn.execute(
                 """SELECT
@@ -1304,9 +1303,9 @@ class PostgresStore:
         with self._pool.connection() as conn:
             cursor = conn.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
             conn.commit()
-            return cursor.rowcount > 0
+            return cast(int, cursor.rowcount) > 0
 
-    def get_job_stats(self) -> dict:
+    def get_job_stats(self) -> dict[str, Any]:
         with self._pool.connection() as conn:
             rows = conn.execute(
                 "SELECT status, COUNT(*) as cnt FROM jobs GROUP BY status"
@@ -1330,7 +1329,7 @@ class PostgresStore:
                 "avg_processing_time_ms": avg_time,
             }
 
-    def _row_to_job(self, row: dict) -> Job:
+    def _row_to_job(self, row: dict[str, Any]) -> Job:
         messages_raw = row["messages_json"]
         messages = json.loads(messages_raw) if messages_raw else []
 
@@ -1378,7 +1377,7 @@ class PostgresStore:
         """Delete a session and all its events. Returns deleted event count."""
         with self._pool.connection() as conn:
             cursor = conn.execute("DELETE FROM events WHERE session_id = %s", (session_id,))
-            deleted = cursor.rowcount
+            deleted = cast(int, cursor.rowcount)
             conn.execute("DELETE FROM session_feedback WHERE session_id = %s", (session_id,))
             conn.execute("DELETE FROM experiment_assignments WHERE session_id = %s", (session_id,))
             conn.execute("DELETE FROM sessions WHERE id = %s", (session_id,))
@@ -1398,7 +1397,7 @@ class PostgresStore:
             events_deleted = 0
             for sid in session_ids:
                 cursor = conn.execute("DELETE FROM events WHERE session_id = %s", (sid,))
-                events_deleted += cursor.rowcount
+                events_deleted += cast(int, cursor.rowcount)
                 conn.execute("DELETE FROM session_feedback WHERE session_id = %s", (sid,))
                 conn.execute("DELETE FROM experiment_assignments WHERE session_id = %s", (sid,))
 
@@ -1504,9 +1503,9 @@ class PostgresStore:
                 (key_id,),
             )
             conn.commit()
-            return cursor.rowcount > 0
+            return cast(int, cursor.rowcount) > 0
 
-    def _row_to_virtual_key(self, row: dict) -> VirtualKey:
+    def _row_to_virtual_key(self, row: dict[str, Any]) -> VirtualKey:
         """Convert a row to a VirtualKey."""
         from stateloom.proxy.virtual_key import VirtualKey
 
@@ -1519,7 +1518,7 @@ class PostgresStore:
                 pass
 
         metadata_raw = row["metadata"]
-        metadata: dict = {}
+        metadata: dict[str, Any] = {}
         if metadata_raw:
             try:
                 metadata = json.loads(metadata_raw)
@@ -1636,7 +1635,7 @@ class PostgresStore:
         fernet = self._get_fernet()
         try:
             if fernet:
-                return fernet.decrypt(row["value"].encode()).decode()
+                return cast(str, fernet.decrypt(row["value"].encode()).decode())
             return base64.b64decode(row["value"]).decode()
         except Exception:
             return ""
@@ -1671,7 +1670,7 @@ class PostgresStore:
             )
             conn.commit()
 
-    def get_admin_lock(self, setting: str) -> dict | None:
+    def get_admin_lock(self, setting: str) -> dict[str, Any] | None:
         with self._pool.connection() as conn:
             row = conn.execute(
                 "SELECT setting, value, locked_by, reason, locked_at "
@@ -1688,7 +1687,7 @@ class PostgresStore:
                 "locked_at": row["locked_at"],
             }
 
-    def list_admin_locks(self) -> list[dict]:
+    def list_admin_locks(self) -> list[dict[str, Any]]:
         with self._pool.connection() as conn:
             rows = conn.execute(
                 "SELECT setting, value, locked_by, reason, locked_at "
@@ -1859,16 +1858,16 @@ class PostgresStore:
                 (agent_id,),
             ).fetchone()
             if row and row["max_ver"] is not None:
-                return row["max_ver"] + 1
+                return cast(int, row["max_ver"]) + 1
             return 1
 
-    def _row_to_agent(self, row: dict) -> Agent:
+    def _row_to_agent(self, row: dict[str, Any]) -> Agent:
         """Convert a row to an Agent."""
         from stateloom.agent.models import Agent
         from stateloom.core.types import AgentStatus
 
         metadata_raw = row["metadata"]
-        metadata: dict = {}
+        metadata: dict[str, Any] = {}
         if metadata_raw:
             try:
                 metadata = json.loads(metadata_raw)
@@ -1889,12 +1888,12 @@ class PostgresStore:
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
-    def _row_to_agent_version(self, row: dict) -> AgentVersion:
+    def _row_to_agent_version(self, row: dict[str, Any]) -> AgentVersion:
         """Convert a row to an AgentVersion."""
         from stateloom.agent.models import AgentVersion
 
         metadata_raw = row["metadata"]
-        metadata: dict = {}
+        metadata: dict[str, Any] = {}
         if metadata_raw:
             try:
                 metadata = json.loads(metadata_raw)
@@ -1902,7 +1901,7 @@ class PostgresStore:
                 pass
 
         overrides_raw = row["request_overrides_json"]
-        overrides: dict = {}
+        overrides: dict[str, Any] = {}
         if overrides_raw:
             try:
                 overrides = json.loads(overrides_raw)
@@ -1925,7 +1924,7 @@ class PostgresStore:
 
     # --- Internal helpers ---
 
-    def _row_to_organization(self, row: dict) -> Organization:
+    def _row_to_organization(self, row: dict[str, Any]) -> Organization:
         pii_rules_raw = row["pii_rules_json"]
         pii_rules: list[PIIRule] = []
         if pii_rules_raw:
@@ -1939,7 +1938,7 @@ class PostgresStore:
                 )
 
         metadata_raw = row["metadata"]
-        metadata: dict = {}
+        metadata: dict[str, Any] = {}
         if metadata_raw:
             try:
                 metadata = json.loads(metadata_raw)
@@ -1969,9 +1968,9 @@ class PostgresStore:
             compliance_profile=compliance_profile,
         )
 
-    def _row_to_team(self, row: dict) -> Team:
+    def _row_to_team(self, row: dict[str, Any]) -> Team:
         metadata_raw = row["metadata"]
-        metadata: dict = {}
+        metadata: dict[str, Any] = {}
         if metadata_raw:
             try:
                 metadata = json.loads(metadata_raw)
@@ -2010,7 +2009,7 @@ class PostgresStore:
             rate_limit_queue_timeout=rate_limit_queue_timeout or 30.0,
         )
 
-    def _row_to_session(self, row: dict) -> Session:
+    def _row_to_session(self, row: dict[str, Any]) -> Session:
         metadata_raw = row["metadata"]
         metadata: dict[str, Any] = {}
         if metadata_raw:
@@ -2113,7 +2112,7 @@ class PostgresStore:
             transport=s_transport,
         )
 
-    def _row_to_experiment(self, row: dict) -> Experiment:
+    def _row_to_experiment(self, row: dict[str, Any]) -> Experiment:
         return Experiment(
             id=row["id"],
             name=row["name"],
@@ -2190,7 +2189,7 @@ class PostgresStore:
         },
     }
 
-    def _event_to_row(self, event: Event) -> tuple:
+    def _event_to_row(self, event: Event) -> tuple[Any, ...]:
         d = event.model_dump(mode="python")
         et = event.event_type
         aliases = self._COL_ALIASES.get(et, {})
@@ -2253,7 +2252,7 @@ class PostgresStore:
             extra_json,
         )
 
-    def _row_to_event(self, row: dict) -> Event:
+    def _row_to_event(self, row: dict[str, Any]) -> Event:
         from pydantic import TypeAdapter
 
         et = EventType(row["event_type"])
@@ -2301,7 +2300,7 @@ class PostgresStore:
         if "mutates_state" in kwargs:
             kwargs["mutates_state"] = bool(kwargs["mutates_state"])
 
-        _event_adapter = TypeAdapter(AnyEvent)
+        _event_adapter: TypeAdapter[AnyEvent] = TypeAdapter(AnyEvent)
         try:
             return _event_adapter.validate_python(kwargs)
         except Exception:

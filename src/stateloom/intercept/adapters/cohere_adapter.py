@@ -168,7 +168,7 @@ class CohereAdapter(BaseProviderAdapter):
             original = get_original(type(client), "chat")
             method = original or client.chat
             if original:
-                return method(client, **request_kwargs)
+                return method(client, **request_kwargs)  # type: ignore[arg-type,misc]
             return method(**request_kwargs)
 
         return request_kwargs, llm_call

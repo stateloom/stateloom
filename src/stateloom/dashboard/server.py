@@ -29,6 +29,13 @@ logger = logging.getLogger("stateloom.dashboard")
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    """Check if a port is already listening."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex((host, port)) == 0
+
+
 class _ReuseAddrServer(uvicorn.Server):
     """Uvicorn server that sets SO_REUSEADDR so the port is freed immediately on stop."""
 
@@ -104,7 +111,7 @@ class DashboardServer:
 
         # HTTP access log middleware — errors and slow requests at INFO,
         # routine polling suppressed entirely, other traffic at DEBUG.
-        _POLL_PREFIXES = (
+        poll_prefixes = (
             "/api/sessions",
             "/api/organizations",
             "/api/teams",
@@ -127,13 +134,19 @@ class DashboardServer:
                 # Errors and slow requests always logged
                 logger.info(
                     "%s %s %d %.0fms",
-                    request.method, path, response.status_code, elapsed_ms,
+                    request.method,
+                    path,
+                    response.status_code,
+                    elapsed_ms,
                 )
-            elif not path.startswith(_POLL_PREFIXES):
+            elif not path.startswith(poll_prefixes):
                 # Non-polling traffic at DEBUG
                 logger.debug(
                     "%s %s %d %.0fms",
-                    request.method, path, response.status_code, elapsed_ms,
+                    request.method,
+                    path,
+                    response.status_code,
+                    elapsed_ms,
                 )
             # Successful polling requests: silent
 
@@ -231,20 +244,11 @@ class DashboardServer:
                         return await call_next(request)
 
                 if not provided_key:
-                    detail = (
-                        "No credentials provided. "
-                        "Send API key or JWT in Authorization header."
-                    )
+                    detail = "No credentials provided. Send API key or JWT in Authorization header."
                 elif self.gate.config.auth.enabled:
-                    detail = (
-                        "Invalid credentials. "
-                        "JWT token may be expired or malformed."
-                    )
+                    detail = "Invalid credentials. JWT token may be expired or malformed."
                 else:
-                    detail = (
-                        "Invalid API key. "
-                        "Check your dashboard_api_key configuration."
-                    )
+                    detail = "Invalid API key. Check your dashboard_api_key configuration."
                 return JSONResponse(
                     status_code=401,
                     content={"detail": detail},
@@ -328,7 +332,7 @@ class DashboardServer:
         # Root-level /metrics endpoint (Prometheus standard path)
         # Must be registered before the catch-all StaticFiles mount
         @app.get("/metrics")
-        async def metrics_endpoint():
+        async def metrics_endpoint() -> Any:
             return create_metrics_endpoint(self.gate)
 
         # WebSocket
@@ -403,6 +407,11 @@ class DashboardServer:
         """Start the dashboard on a background daemon thread."""
         host = self.gate.config.dashboard_config.host
         port = self.gate.config.dashboard_config.port
+
+        # Skip start if a dashboard is already reachable on this port
+        if _port_in_use(host, port):
+            logger.info("[StateLoom] Dashboard already running at http://%s:%s", host, port)
+            return
 
         config = uvicorn.Config(
             app=self.app,

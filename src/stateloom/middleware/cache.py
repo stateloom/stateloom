@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -17,6 +18,31 @@ if TYPE_CHECKING:
     from stateloom.cache.semantic import SemanticMatcher
 
 logger = logging.getLogger("stateloom.middleware.cache")
+
+_SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
+
+
+def _extract_prompt_preview(messages: list[dict[str, Any]]) -> str:
+    """Extract a short preview of the last user message."""
+    for msg in reversed(messages if isinstance(messages, list) else []):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            text = _SYSTEM_REMINDER_RE.sub("", content).strip()
+        elif isinstance(content, list):
+            text = ""
+            for part in reversed(content):
+                if isinstance(part, dict) and part.get("type") == "text":
+                    candidate = _SYSTEM_REMINDER_RE.sub("", part.get("text", "")).strip()
+                    if candidate:
+                        text = candidate
+                        break
+        else:
+            continue
+        if text:
+            return (text[:50] + "...") if len(text) > 50 else text
+    return ""
 
 
 def _is_error_response(result: Any) -> bool:
@@ -139,7 +165,9 @@ class CacheMiddleware:
                 if matched_entry is not None and score >= self._similarity_threshold:
                     logger.debug(
                         "Cache hit (semantic): score=%.3f hash=%s session=%s",
-                        score, matched_entry.request_hash, ctx.session.id,
+                        score,
+                        matched_entry.request_hash,
+                        ctx.session.id,
                     )
                     return await self._serve_cache_hit(
                         ctx,
@@ -170,14 +198,14 @@ class CacheMiddleware:
             response_json = serialize_response(result)
 
             # Compute embedding for semantic index (reuse from shared cache)
-            embedding: list[float] | None = None
+            store_embedding: list[float] | None = None
             if self._semantic is not None:
                 try:
                     cache_key = f"embed:{request_hash}"
-                    embedding = ctx._embedding_cache.get(cache_key)
-                    if embedding is None:
-                        embedding = self._semantic.embed_request(ctx.request_kwargs)
-                        ctx._embedding_cache[cache_key] = embedding
+                    store_embedding = ctx._embedding_cache.get(cache_key)
+                    if store_embedding is None:
+                        store_embedding = self._semantic.embed_request(ctx.request_kwargs)
+                        ctx._embedding_cache[cache_key] = store_embedding
                 except Exception:
                     logger.debug("Semantic embedding failed", exc_info=True)
 
@@ -189,12 +217,12 @@ class CacheMiddleware:
                 provider=ctx.provider,
                 cost=cost,
                 created_at=time.time(),
-                embedding=embedding,
+                embedding=store_embedding,
             )
             self._store.put(entry)
 
             # Add to semantic index
-            if self._semantic is not None and embedding is not None:
+            if self._semantic is not None and store_embedding is not None:
                 try:
                     self._semantic.add(entry)
                 except Exception:
@@ -213,6 +241,7 @@ class CacheMiddleware:
         matched_hash: str,
     ) -> Any:
         """Shared logic for serving a cache hit (exact or semantic)."""
+        prompt_preview = _extract_prompt_preview(ctx.request_kwargs.get("messages", []))
         event = CacheHitEvent(
             session_id=ctx.session.id,
             step=ctx.session.step_counter,
@@ -222,6 +251,7 @@ class CacheMiddleware:
             match_type=match_type,
             similarity_score=similarity_score,
             matched_hash=matched_hash,
+            prompt_preview=prompt_preview,
         )
         ctx.events.append(event)
         ctx.session.add_cache_hit(entry.cost)

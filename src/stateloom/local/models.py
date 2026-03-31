@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-MODEL_CATALOG: list[dict] = [
+from typing import Any
+
+MODEL_CATALOG: list[dict[str, Any]] = [
     # Ultra-light (<2GB)
     {
         "model": "qwen2.5:0.5b",

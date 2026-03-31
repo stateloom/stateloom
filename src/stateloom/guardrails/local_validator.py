@@ -84,7 +84,7 @@ class LocalGuardrailValidator:
                 self._available = False
                 return False
 
-    def validate(self, messages: list[dict]) -> GuardrailResult:
+    def validate(self, messages: list[dict[str, Any]]) -> GuardrailResult:
         """Classify messages as safe/unsafe using Llama-Guard.
 
         Returns safe result on any error (fail-open).

@@ -6,11 +6,12 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any
-
-logger = logging.getLogger("stateloom.replay.schema")
+from collections.abc import AsyncIterator, Iterator
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("stateloom.replay.schema")
 
 SESSION_SCHEMA_VERSION = "v1"
 
@@ -27,13 +28,13 @@ class CachedStreamChunks:
         self.chunks = chunks
         self.delay_ms = delay_ms
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         for chunk in self.chunks:
             if self.delay_ms > 0:
                 time.sleep(self.delay_ms / 1000)
             yield chunk
 
-    async def __aiter__(self):
+    async def __aiter__(self) -> AsyncIterator[Any]:
         for chunk in self.chunks:
             if self.delay_ms > 0:
                 await asyncio.sleep(self.delay_ms / 1000)
@@ -80,7 +81,7 @@ def serialize_response(response: Any) -> str:
         return json.dumps(data)
 
     if hasattr(response, "model_dump_json"):
-        return response.model_dump_json()
+        return cast(str, response.model_dump_json())
     if hasattr(response, "model_dump"):
         return json.dumps(response.model_dump())
     return json.dumps(response, default=str)

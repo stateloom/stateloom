@@ -15,7 +15,8 @@ def test_init_returns_gate():
     assert isinstance(gate, Gate)
 
 
-def test_init_idempotent():
+def test_init_reinitializes():
+    """Calling init() when already initialized shuts down the old gate and creates a fresh one."""
     gate1 = stateloom.init(
         auto_patch=False,
         dashboard=False,
@@ -30,7 +31,8 @@ def test_init_idempotent():
         store_backend="memory",
         local_model=None,
     )
-    assert gate1 is gate2  # Same instance
+    assert gate1 is not gate2  # Fresh gate on re-init
+    assert isinstance(gate2, Gate)
 
 
 def test_get_gate_after_init():
@@ -67,8 +69,21 @@ def test_shutdown():
         stateloom.get_gate()
 
 
-def test_auto_route_enabled_when_local_model_set():
-    """Setting local_model should auto-enable auto_route."""
+def test_auto_route_enabled_when_explicitly_set():
+    """auto_route=True enables auto-routing (opt-in only)."""
+    gate = stateloom.init(
+        auto_patch=False,
+        dashboard=False,
+        console_output=False,
+        store_backend="memory",
+        local_model="llama3.2",
+        auto_route=True,
+    )
+    assert gate.config.auto_route_enabled is True
+
+
+def test_auto_route_not_auto_enabled_by_local_model():
+    """Setting local_model alone does NOT auto-enable auto_route."""
     gate = stateloom.init(
         auto_patch=False,
         dashboard=False,
@@ -76,7 +91,7 @@ def test_auto_route_enabled_when_local_model_set():
         store_backend="memory",
         local_model="llama3.2",
     )
-    assert gate.config.auto_route_enabled is True
+    assert gate.config.auto_route_enabled is False
 
 
 def test_auto_route_disabled_explicitly():

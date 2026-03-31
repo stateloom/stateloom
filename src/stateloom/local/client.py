@@ -6,7 +6,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -258,32 +258,32 @@ class OllamaClient:
             raise OllamaModelNotFoundError(f"model '{model}' not found — run: ollama pull {model}")
         resp.raise_for_status()
 
-    def list_models(self) -> list[dict]:
+    def list_models(self) -> list[dict[str, Any]]:
         """List locally downloaded Ollama models (with retry)."""
-        return self._retry_sync(self._list_models_once)
+        return cast(list[dict[str, Any]], self._retry_sync(self._list_models_once))
 
-    def _list_models_once(self) -> list[dict]:
+    def _list_models_once(self) -> list[dict[str, Any]]:
         client = self._get_sync_client()
         resp = client.get("/api/tags")
         resp.raise_for_status()
         data = resp.json()
-        return data.get("models", [])
+        return cast(list[dict[str, Any]], data.get("models", []))
 
-    async def alist_models(self) -> list[dict]:
+    async def alist_models(self) -> list[dict[str, Any]]:
         """List locally downloaded Ollama models (async, with retry)."""
-        return await self._retry_async(self._alist_models_once)
+        return cast(list[dict[str, Any]], await self._retry_async(self._alist_models_once))
 
-    async def _alist_models_once(self) -> list[dict]:
+    async def _alist_models_once(self) -> list[dict[str, Any]]:
         client = self._get_async_client()
         resp = await client.get("/api/tags")
         resp.raise_for_status()
         data = resp.json()
-        return data.get("models", [])
+        return cast(list[dict[str, Any]], data.get("models", []))
 
     def pull_model(
         self,
         model: str,
-        progress_callback: Callable[[dict], None] | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         """Download a model from Ollama registry with streaming progress."""
         # Use a longer timeout for model downloads
@@ -302,16 +302,16 @@ class OllamaClient:
                     if progress_callback:
                         progress_callback(data)
 
-    def show_model(self, model: str) -> dict:
+    def show_model(self, model: str) -> dict[str, Any]:
         """Get model details (with retry)."""
 
-        def _once() -> dict:
+        def _once() -> dict[str, Any]:
             client = self._get_sync_client()
             resp = client.post("/api/show", json={"model": model})
             resp.raise_for_status()
-            return resp.json()
+            return cast(dict[str, Any], resp.json())
 
-        return self._retry_sync(_once)
+        return cast(dict[str, Any], self._retry_sync(_once))
 
     def delete_model(self, model: str) -> None:
         """Delete a locally downloaded model."""
@@ -393,7 +393,7 @@ class OllamaClient:
         assert last_exc is not None
         raise last_exc
 
-    def _parse_response(self, data: dict, elapsed_ms: float) -> OllamaResponse:
+    def _parse_response(self, data: dict[str, Any], elapsed_ms: float) -> OllamaResponse:
         """Parse Ollama API response into OllamaResponse."""
         message = data.get("message", {})
         content = message.get("content", "")

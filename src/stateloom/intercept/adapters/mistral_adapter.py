@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stateloom.core.types import Provider
+
+if TYPE_CHECKING:
+    from stateloom.middleware.base import StreamChunkInfo
 from stateloom.intercept.provider_adapter import BaseProviderAdapter, PatchTarget, TokenFieldMap
 
 _TOKEN_FIELDS = TokenFieldMap()
@@ -133,7 +136,7 @@ class MistralAdapter(BaseProviderAdapter):
 
         def llm_call() -> Any:
             try:
-                from mistralai import Mistral
+                from mistralai import Mistral  # type: ignore[attr-defined]
             except ImportError:
                 raise ImportError(
                     "mistralai package is required for Mistral models. "

@@ -20,3 +20,4 @@ class StepRecord:
     mutates_state: bool = False
     provider: str | None = None
     model: str | None = None
+    prompt_preview: str = ""

@@ -58,14 +58,14 @@ class SemanticMatcher:
         if vector_backend is None:
             from stateloom.cache.vector_backend import FaissBackend
 
-            vector_backend = FaissBackend(dimension=self._dim)
+            vector_backend = FaissBackend(dimension=self._dim or 384)
         self._backend: VectorBackend = vector_backend
 
         # Local entry lookup: entry_id (request_hash) -> CacheEntry
         self._entries: dict[str, CacheEntry] = {}
         self._lock = threading.Lock()
 
-    def embed_request(self, request_kwargs: dict) -> list[float]:
+    def embed_request(self, request_kwargs: dict[str, Any]) -> list[float]:
         """Extract text from request kwargs and return a normalized embedding vector."""
         text = self._extract_text(request_kwargs)
         embedding = self._model.encode(text, normalize_embeddings=True)
@@ -113,7 +113,7 @@ class SemanticMatcher:
             self._entries = {e.request_hash: e for e in entries if e.embedding is not None}
 
     @staticmethod
-    def _extract_text(request_kwargs: dict) -> str:
+    def _extract_text(request_kwargs: dict[str, Any]) -> str:
         """Extract message content from request kwargs for embedding.
 
         Includes model name as a prefix to differentiate requests

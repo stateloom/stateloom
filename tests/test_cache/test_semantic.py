@@ -154,12 +154,12 @@ class TestSemanticMatcher:
         ]
         self.matcher.rebuild_from_entries(entries)
         # Only one entry with embedding added
-        assert self.matcher._index.ntotal == 1
+        assert len(self.matcher._entries) == 1
 
     def test_add_skips_no_embedding(self):
         entry = _make_entry(embedding=None)
         self.matcher.add(entry)
-        assert self.matcher._index.ntotal == 0
+        assert len(self.matcher._entries) == 0
 
     def test_extract_text_gemini_format(self):
         kwargs = {

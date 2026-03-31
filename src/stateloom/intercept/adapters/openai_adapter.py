@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stateloom.core.types import Provider
+
+if TYPE_CHECKING:
+    from stateloom.middleware.base import StreamChunkInfo
 from stateloom.intercept.provider_adapter import BaseProviderAdapter, PatchTarget, TokenFieldMap
 
 logger = logging.getLogger("stateloom.intercept.adapters.openai")
@@ -77,7 +80,7 @@ class OpenAIAdapter(BaseProviderAdapter):
     def to_openai_dict(self, response: Any, model: str, request_id: str) -> dict[str, Any]:
         """Convert OpenAI ChatCompletion — mostly passthrough via model_dump."""
         if hasattr(response, "model_dump"):
-            result = response.model_dump()
+            result: dict[str, Any] = response.model_dump()
             result["id"] = request_id
             return result
 
@@ -184,7 +187,7 @@ class OpenAIAdapter(BaseProviderAdapter):
             original = get_original(type(client.chat.completions), "create")
             method = original or client.chat.completions.create
             if original:
-                return method(client.chat.completions, **request_kwargs)
+                return method(client.chat.completions, **request_kwargs)  # type: ignore[call-overload]
             return method(**request_kwargs)
 
         return request_kwargs, llm_call

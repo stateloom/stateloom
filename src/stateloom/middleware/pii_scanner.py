@@ -118,6 +118,8 @@ class PIIScannerMiddleware:
             self._rules[rule.pattern] = rule
         self._default_mode = config.pii.default_mode
         self._last_store_poll: float = 0.0
+        # When init() provides explicit rules, don't let store sync override them
+        self._rules_from_init = len(config.pii.rules) > 0
 
     def reload_rules(self) -> None:
         """Reload rules from config (called after runtime rule changes)."""
@@ -129,8 +131,12 @@ class PIIScannerMiddleware:
         self._default_mode = self._config.pii.default_mode
 
     def _sync_from_store(self) -> None:
-        """Poll persisted PII config from the store (cross-process sync)."""
-        if not self._store:
+        """Poll persisted PII config from the store (cross-process sync).
+
+        Skipped when ``init()`` provided explicit PII rules — code-level config
+        takes precedence over dashboard/API-persisted config.
+        """
+        if not self._store or self._rules_from_init:
             return
         now = time.monotonic()
         if now - self._last_store_poll < _STORE_POLL_INTERVAL:
@@ -279,7 +285,7 @@ class PIIScannerMiddleware:
 
     def _strip_known_blocked_pii(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         session: Any,
         system: str,
     ) -> tuple[set[int], bool]:
@@ -371,6 +377,30 @@ class PIIScannerMiddleware:
 
         return strip_indices, strip_system
 
+    def _make_pii_event(
+        self,
+        ctx: MiddlewareContext,
+        match: PIIMatch,
+        mode: PIIMode,
+        extra_meta: dict[str, Any] | None = None,
+    ) -> PIIDetectionEvent:
+        """Build a ``PIIDetectionEvent`` for a single PII match."""
+        meta: dict[str, Any] = {
+            "redacted_preview": _mask_pii_text(match.matched_text, match.pattern_name),
+            "match_length": len(match.matched_text),
+        }
+        if extra_meta:
+            meta.update(extra_meta)
+        return PIIDetectionEvent(
+            session_id=ctx.session.id,
+            step=ctx.session.step_counter,
+            pii_type=match.pattern_name,
+            mode=mode.value,
+            pii_field=match.field,
+            action_taken=_MODE_TO_ACTION[mode],
+            metadata=meta,
+        )
+
     async def _do_process(
         self,
         ctx: MiddlewareContext,
@@ -382,6 +412,125 @@ class PIIScannerMiddleware:
         # in unrelated sessions.
         if ctx.request_kwargs.get("_cli_internal"):
             return await call_next(ctx)
+
+        # Dispatch: proxy requests use the stateful CLI-aware path;
+        # SDK requests use the simple per-call path.
+        if ctx.request_kwargs.get("_proxy"):
+            return await self._do_process_proxy(ctx, call_next)
+        return await self._do_process_sdk(ctx, call_next)
+
+    # ------------------------------------------------------------------
+    # SDK path — simple, stateless per-call scanning
+    # ------------------------------------------------------------------
+
+    async def _do_process_sdk(
+        self,
+        ctx: MiddlewareContext,
+        call_next: Callable[[MiddlewareContext], Awaitable[Any]],
+    ) -> Any:
+        """PII scanning for SDK / ``stateloom.chat()`` calls.
+
+        Every call is independent — no Phase 1, no active-turn vs history
+        distinction, no ``_pii_blocked_hashes`` tracking.  Each message is
+        scanned equally and the configured action (block/redact/audit)
+        applies unconditionally.
+        """
+        messages = ctx.request_kwargs.get("messages", [])
+        system = ctx.request_kwargs.get("system", "")
+
+        rehydrator = PIIRehydrator()
+        blocked_matches: list[PIIMatch] = []
+        redact_matches: list[PIIMatch] = []
+
+        # Scan all messages
+        for i, msg in enumerate(messages):
+            content = msg.get("content", "")
+            if not content:
+                continue
+            msg_matches = self._scan_content(
+                content,
+                field=f"messages[{i}].content",
+            )
+            for match in msg_matches:
+                mode = self._get_mode(match.pattern_name, org_id=ctx.session.org_id)
+                if mode == PIIMode.BLOCK:
+                    event = self._make_pii_event(ctx, match, mode)
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
+                    blocked_matches.append(match)
+                elif mode == PIIMode.REDACT:
+                    event = self._make_pii_event(ctx, match, mode)
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
+                    redact_matches.append(match)
+                elif mode == PIIMode.AUDIT:
+                    event = self._make_pii_event(ctx, match, mode)
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
+
+        # Scan system prompt
+        if isinstance(system, str) and system:
+            sys_matches = self._scanner.scan(system, field="system")
+            for match in sys_matches:
+                mode = self._get_mode(match.pattern_name, org_id=ctx.session.org_id)
+                if mode == PIIMode.BLOCK:
+                    event = self._make_pii_event(ctx, match, mode)
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
+                    blocked_matches.append(match)
+                elif mode == PIIMode.REDACT:
+                    event = self._make_pii_event(ctx, match, mode)
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
+                    redact_matches.append(match)
+                elif mode == PIIMode.AUDIT:
+                    event = self._make_pii_event(ctx, match, mode)
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
+
+        if not blocked_matches and not redact_matches and not ctx.events:
+            return await call_next(ctx)
+
+        # Block
+        if blocked_matches:
+            self._save_events_directly(ctx)
+            pii_types = ", ".join(set(m.pattern_name for m in blocked_matches))
+            raise StateLoomPIIBlockedError(
+                pii_type=pii_types,
+                session_id=ctx.session.id,
+            )
+
+        # Redact
+        if redact_matches:
+            self._redact_messages(ctx, redact_matches, rehydrator)
+            system = ctx.request_kwargs.get("system", "")
+            if isinstance(system, str) and system:
+                sys_redact = [m for m in redact_matches if m.field == "system"]
+                if sys_redact:
+                    ctx.request_kwargs["system"] = rehydrator.redact(system, sys_redact)
+
+        result = await call_next(ctx)
+
+        if redact_matches and result is not None:
+            self._rehydrate_response(result, rehydrator, provider=ctx.provider)
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Proxy path — stateful, CLI-aware scanning
+    # ------------------------------------------------------------------
+
+    async def _do_process_proxy(
+        self,
+        ctx: MiddlewareContext,
+        call_next: Callable[[MiddlewareContext], Awaitable[Any]],
+    ) -> Any:
+        """PII scanning for proxy / CLI flows.
+
+        Includes Phase 1 (strip previously-blocked PII), active-turn vs
+        history distinction, cooldown timers, and hash tracking — all the
+        logic needed for CLI tools that resend full conversation history.
+        """
 
         messages = ctx.request_kwargs.get("messages", [])
         system = ctx.request_kwargs.get("system", "")
@@ -417,18 +566,28 @@ class PIIScannerMiddleware:
 
             ctx.request_kwargs["messages"] = messages
 
+            # If all messages were stripped (entire request was previously-
+            # blocked PII, e.g. a retry), raise instead of forwarding an
+            # empty request that would crash the provider SDK.
+            if not messages:
+                logger.warning(
+                    "[PII] All messages stripped by Phase 1 — request contains "
+                    "only previously-blocked PII"
+                )
+                self._save_events_directly(ctx)
+                raise StateLoomPIIBlockedError(
+                    pii_type="previously blocked",
+                    session_id=ctx.session.id,
+                )
+
         if strip_system:
             logger.info("[PII] Stripping previously-blocked system prompt from request")
             ctx.request_kwargs.pop("system", None)
             system = ""
 
-        # ── Phase 2: scan remaining messages with PII-value dedup ──
-        # Load hash sets from session metadata.
+        # ── Phase 2: scan remaining messages for PII ──
         blocked_hashes: set[str] = set(
             ctx.session.metadata.get("_pii_blocked_hashes", []),
-        )
-        seen_hashes: set[str] = set(
-            ctx.session.metadata.get("_pii_seen_hashes", []),
         )
 
         # Snapshot of PII blocked in *previous* requests — used to
@@ -467,13 +626,11 @@ class PIIScannerMiddleware:
             for match in msg_matches:
                 mode = self._get_mode(match.pattern_name, org_id=ctx.session.org_id)
                 vh = self._pii_value_hash(match.matched_text)
-                is_seen = vh in seen_hashes
-                seen_hashes.add(vh)
 
                 if mode == PIIMode.BLOCK:
                     if is_active_turn:
                         # PII in the active turn — always block the request.
-                        is_reblock = is_seen
+                        is_reblock = vh in initial_blocked_hashes
                         emit_event = True
                         if is_reblock and vh in initial_blocked_hashes:
                             # PII was blocked in a PREVIOUS request.
@@ -506,7 +663,7 @@ class PIIScannerMiddleware:
                             ctx.session.add_pii_detection()
                         blocked_matches.append(match)
                         blocked_hashes.add(vh)
-                    elif not is_seen and msg.get("role") == "user":
+                    elif vh not in initial_blocked_hashes and msg.get("role") == "user":
                         # New PII in a history USER message (not the active
                         # turn).  Strip instead of blocking — the user didn't
                         # type this now; the CLI included old conversation
@@ -514,7 +671,7 @@ class PIIScannerMiddleware:
                         # restart when history contains previously-blocked PII.
                         phase2_strip_indices.add(i)
                         blocked_hashes.add(vh)
-                    elif not is_seen:
+                    elif vh not in initial_blocked_hashes:
                         # New PII in a non-user history message (assistant/
                         # model) — block like normal (possible model PII leak).
                         event = PIIDetectionEvent(
@@ -550,97 +707,26 @@ class PIIScannerMiddleware:
                             blocked_matches.append(match)
 
                 elif mode == PIIMode.REDACT:
-                    if not is_seen:
-                        event = PIIDetectionEvent(
-                            session_id=ctx.session.id,
-                            step=ctx.session.step_counter,
-                            pii_type=match.pattern_name,
-                            mode=mode.value,
-                            pii_field=match.field,
-                            action_taken=_MODE_TO_ACTION[mode],
-                            metadata={
-                                "redacted_preview": _mask_pii_text(
-                                    match.matched_text,
-                                    match.pattern_name,
-                                ),
-                                "match_length": len(match.matched_text),
-                            },
-                        )
-                        ctx.events.append(event)
-                        ctx.session.add_pii_detection()
+                    event = PIIDetectionEvent(
+                        session_id=ctx.session.id,
+                        step=ctx.session.step_counter,
+                        pii_type=match.pattern_name,
+                        mode=mode.value,
+                        pii_field=match.field,
+                        action_taken=_MODE_TO_ACTION[mode],
+                        metadata={
+                            "redacted_preview": _mask_pii_text(
+                                match.matched_text,
+                                match.pattern_name,
+                            ),
+                            "match_length": len(match.matched_text),
+                        },
+                    )
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
                     redact_matches.append(match)
 
                 elif mode == PIIMode.AUDIT:
-                    if not is_seen:
-                        event = PIIDetectionEvent(
-                            session_id=ctx.session.id,
-                            step=ctx.session.step_counter,
-                            pii_type=match.pattern_name,
-                            mode=mode.value,
-                            pii_field=match.field,
-                            action_taken=_MODE_TO_ACTION[mode],
-                            metadata={
-                                "redacted_preview": _mask_pii_text(
-                                    match.matched_text,
-                                    match.pattern_name,
-                                ),
-                                "match_length": len(match.matched_text),
-                            },
-                        )
-                        ctx.events.append(event)
-                        ctx.session.add_pii_detection()
-
-        # --- System prompt ---
-        if isinstance(system, str) and system:
-            sys_matches = self._scanner.scan(system, field="system")
-            for match in sys_matches:
-                mode = self._get_mode(match.pattern_name, org_id=ctx.session.org_id)
-                vh = self._pii_value_hash(match.matched_text)
-                is_seen = vh in seen_hashes
-                seen_hashes.add(vh)
-
-                if mode == PIIMode.BLOCK:
-                    if not is_seen:
-                        event = PIIDetectionEvent(
-                            session_id=ctx.session.id,
-                            step=ctx.session.step_counter,
-                            pii_type=match.pattern_name,
-                            mode=mode.value,
-                            pii_field=match.field,
-                            action_taken=_MODE_TO_ACTION[mode],
-                            metadata={
-                                "redacted_preview": _mask_pii_text(
-                                    match.matched_text,
-                                    match.pattern_name,
-                                ),
-                                "match_length": len(match.matched_text),
-                            },
-                        )
-                        ctx.events.append(event)
-                        ctx.session.add_pii_detection()
-                        blocked_matches.append(match)
-                        blocked_hashes.add(vh)
-                elif mode == PIIMode.REDACT:
-                    if not is_seen:
-                        event = PIIDetectionEvent(
-                            session_id=ctx.session.id,
-                            step=ctx.session.step_counter,
-                            pii_type=match.pattern_name,
-                            mode=mode.value,
-                            pii_field=match.field,
-                            action_taken=_MODE_TO_ACTION[mode],
-                            metadata={
-                                "redacted_preview": _mask_pii_text(
-                                    match.matched_text,
-                                    match.pattern_name,
-                                ),
-                                "match_length": len(match.matched_text),
-                            },
-                        )
-                        ctx.events.append(event)
-                        ctx.session.add_pii_detection()
-                    redact_matches.append(match)
-                elif mode == PIIMode.AUDIT and not is_seen:
                     event = PIIDetectionEvent(
                         session_id=ctx.session.id,
                         step=ctx.session.step_counter,
@@ -659,10 +745,74 @@ class PIIScannerMiddleware:
                     ctx.events.append(event)
                     ctx.session.add_pii_detection()
 
-        # Persist hash sets immediately so they survive block errors and
-        # upstream failures.
+        # --- System prompt ---
+        if isinstance(system, str) and system:
+            sys_matches = self._scanner.scan(system, field="system")
+            for match in sys_matches:
+                mode = self._get_mode(match.pattern_name, org_id=ctx.session.org_id)
+                vh = self._pii_value_hash(match.matched_text)
+
+                if mode == PIIMode.BLOCK:
+                    event = PIIDetectionEvent(
+                        session_id=ctx.session.id,
+                        step=ctx.session.step_counter,
+                        pii_type=match.pattern_name,
+                        mode=mode.value,
+                        pii_field=match.field,
+                        action_taken=_MODE_TO_ACTION[mode],
+                        metadata={
+                            "redacted_preview": _mask_pii_text(
+                                match.matched_text,
+                                match.pattern_name,
+                            ),
+                            "match_length": len(match.matched_text),
+                        },
+                    )
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
+                    blocked_matches.append(match)
+                    blocked_hashes.add(vh)
+                elif mode == PIIMode.REDACT:
+                    event = PIIDetectionEvent(
+                        session_id=ctx.session.id,
+                        step=ctx.session.step_counter,
+                        pii_type=match.pattern_name,
+                        mode=mode.value,
+                        pii_field=match.field,
+                        action_taken=_MODE_TO_ACTION[mode],
+                        metadata={
+                            "redacted_preview": _mask_pii_text(
+                                match.matched_text,
+                                match.pattern_name,
+                            ),
+                            "match_length": len(match.matched_text),
+                        },
+                    )
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
+                    redact_matches.append(match)
+                elif mode == PIIMode.AUDIT:
+                    event = PIIDetectionEvent(
+                        session_id=ctx.session.id,
+                        step=ctx.session.step_counter,
+                        pii_type=match.pattern_name,
+                        mode=mode.value,
+                        pii_field=match.field,
+                        action_taken=_MODE_TO_ACTION[mode],
+                        metadata={
+                            "redacted_preview": _mask_pii_text(
+                                match.matched_text,
+                                match.pattern_name,
+                            ),
+                            "match_length": len(match.matched_text),
+                        },
+                    )
+                    ctx.events.append(event)
+                    ctx.session.add_pii_detection()
+
+        # Persist blocked hashes immediately so they survive block errors
+        # and upstream failures.
         ctx.session.metadata["_pii_blocked_hashes"] = list(blocked_hashes)
-        ctx.session.metadata["_pii_seen_hashes"] = list(seen_hashes)
         if self._store:
             try:
                 self._store.save_session(ctx.session)
@@ -702,7 +852,8 @@ class PIIScannerMiddleware:
             # are suppressed.  Re-blocks during cooldown never create
             # events, so they never reach here — no lockout risk.
             has_new_blocks = any(
-                isinstance(e, PIIDetectionEvent) and e.action_taken == ActionTaken.BLOCKED for e in ctx.events
+                isinstance(e, PIIDetectionEvent) and e.action_taken == ActionTaken.BLOCKED
+                for e in ctx.events
             )
             if has_new_blocks:
                 ctx.session.metadata["_pii_last_block_ts"] = time.time()
@@ -808,7 +959,6 @@ class PIIScannerMiddleware:
         import re as _re
 
         # Build old-index → new-index mapping
-        sorted_stripped = sorted(stripped)
         index_map: dict[int, int] = {}
         offset = 0
         for old_idx in range(max(stripped) + 50):  # generous upper bound
@@ -820,7 +970,7 @@ class PIIScannerMiddleware:
         pattern = _re.compile(r"messages\[(\d+)\]")
         for match in matches:
 
-            def _replace(m: _re.Match) -> str:
+            def _replace(m: _re.Match[str]) -> str:
                 old = int(m.group(1))
                 new = index_map.get(old, old)
                 return f"messages[{new}]"

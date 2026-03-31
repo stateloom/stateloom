@@ -10,7 +10,7 @@ from typing import Any
 logger = logging.getLogger("stateloom.pii.ner")
 
 try:
-    from gliner import GLiNER
+    from gliner import GLiNER  # type: ignore[import-not-found]
 
     _GLINER_AVAILABLE = True
 except ImportError:

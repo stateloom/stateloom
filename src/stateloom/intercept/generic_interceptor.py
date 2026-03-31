@@ -51,18 +51,48 @@ def _inject_api_key_if_needed(gate: Gate, adapter: ProviderAdapter, instance: An
             # Safe for single-tenant/single-key but breaks under multi-key.
             # The google.generativeai SDK has no per-client key API.
             # Proper fix requires migrating to google-genai SDK (out of scope).
-            genai.configure(api_key=key)
+            genai.configure(api_key=key)  # type: ignore[attr-defined]
         except ImportError:
             pass
 
 
-def _check_replay(gate: Gate, step: int) -> Any | None:
-    """Check if the replay engine wants to mock this step."""
+def _check_replay(gate: Gate, step: int, session: Any = None) -> Any | None:
+    """Check if the replay engine wants to mock this step.
+
+    When a cached response is returned, a ``CacheHitEvent`` is persisted so
+    replayed steps appear in the dashboard trace timeline.
+    """
     engine = get_current_replay_engine()
     if engine is not None and engine.is_active and engine.should_mock(step):
         logger.debug("Replay: returning cached response for step %d", step)
-        return engine.get_cached_response(step)
+        cached = engine.get_cached_response(step)
+        if cached is not None and session is not None:
+            _record_replay_event(gate, session, step, engine)
+        return cached
     return None
+
+
+def _record_replay_event(gate: Gate, session: Any, step: int, engine: Any) -> None:
+    """Record a CacheHitEvent for a replayed step (fail-open)."""
+    try:
+        from stateloom.core.event import CacheHitEvent
+
+        record = engine._step_index.get(step)
+        model = getattr(record, "model", "") or ""
+        prompt = getattr(record, "prompt_preview", "") or f"[replayed step {step}]"
+
+        event = CacheHitEvent(
+            session_id=session.id,
+            step=step,
+            original_model=model,
+            saved_cost=0.0,
+            match_type="replay",
+            prompt_preview=prompt,
+        )
+        gate.store.save_event(event)
+        session.cache_hits += 1
+    except Exception:
+        logger.debug("Failed to record replay event for step %d", step, exc_info=True)
 
 
 def patch_provider(gate: Gate, adapter: ProviderAdapter) -> list[str]:
@@ -129,7 +159,7 @@ def _intercept_sync(
     adapter: ProviderAdapter,
     original: Any,
     instance: Any,
-    args: tuple,
+    args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
     """Intercept a sync LLM call through the middleware pipeline."""
@@ -137,14 +167,17 @@ def _intercept_sync(
     model = adapter.extract_model(instance, args, kwargs)
 
     try:
-        session = gate.get_or_create_session()
+        session = gate.get_or_create_session(provider=adapter.name)
         step = session.next_step()
         logger.debug(
             "Intercept sync: provider=%s model=%s session=%s step=%d",
-            adapter.name, model, session.id, step,
+            adapter.name,
+            model,
+            session.id,
+            step,
         )
 
-        cached = _check_replay(gate, step)
+        cached = _check_replay(gate, step, session)
         if cached is not None:
             return cached
 
@@ -182,7 +215,14 @@ def _intercept_sync(
             if pii_mw and hasattr(pii_mw, "create_stream_buffer"):
                 stream_buffer = pii_mw.create_stream_buffer()
 
-            result = original(instance, *args, **kwargs)
+            # Rebuild call args so middleware modifications (PII redaction,
+            # Phase 1 strip) are reflected in the actual provider call.
+            live_args, live_kwargs = adapter.rebuild_call_args(
+                normalized_kwargs,
+                args,
+                kwargs,
+            )
+            result = original(instance, *live_args, **live_kwargs)
             return _wrap_stream_sync(
                 gate,
                 adapter,
@@ -190,12 +230,22 @@ def _intercept_sync(
                 session,
                 model,
                 step,
-                kwargs,
+                live_kwargs,
                 ctx=ctx,
                 stream_buffer=stream_buffer,
             )
 
         normalized_kwargs = adapter.normalize_request(args, kwargs)
+
+        def _llm_call() -> Any:
+            # Rebuild call args so middleware modifications (PII redaction,
+            # Phase 1 strip) are reflected in the actual provider call.
+            live_args, live_kwargs = adapter.rebuild_call_args(
+                normalized_kwargs,
+                args,
+                kwargs,
+            )
+            return original(instance, *live_args, **live_kwargs)
 
         result = gate.pipeline.execute_sync(
             provider=adapter.name,
@@ -204,7 +254,7 @@ def _intercept_sync(
             request_kwargs=normalized_kwargs,
             session=session,
             config=gate.config,
-            llm_call=lambda: original(instance, *args, **kwargs),
+            llm_call=_llm_call,
             provider_base_url=provider_base_url,
         )
 
@@ -227,7 +277,7 @@ async def _intercept_async(
     adapter: ProviderAdapter,
     original: Any,
     instance: Any,
-    args: tuple,
+    args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
     """Intercept an async LLM call through the middleware pipeline."""
@@ -235,14 +285,17 @@ async def _intercept_async(
     model = adapter.extract_model(instance, args, kwargs)
 
     try:
-        session = gate.get_or_create_session()
+        session = gate.get_or_create_session(provider=adapter.name)
         step = session.next_step()
         logger.debug(
             "Intercept async: provider=%s model=%s session=%s step=%d",
-            adapter.name, model, session.id, step,
+            adapter.name,
+            model,
+            session.id,
+            step,
         )
 
-        cached = _check_replay(gate, step)
+        cached = _check_replay(gate, step, session)
         if cached is not None:
             return cached
 
@@ -280,7 +333,14 @@ async def _intercept_async(
             if pii_mw and hasattr(pii_mw, "create_stream_buffer"):
                 stream_buffer = pii_mw.create_stream_buffer()
 
-            result = await original(instance, *args, **kwargs)
+            # Rebuild call args so middleware modifications (PII redaction,
+            # Phase 1 strip) are reflected in the actual provider call.
+            live_args, live_kwargs = adapter.rebuild_call_args(
+                normalized_kwargs,
+                args,
+                kwargs,
+            )
+            result = await original(instance, *live_args, **live_kwargs)
             return _wrap_stream_async(
                 gate,
                 adapter,
@@ -288,12 +348,22 @@ async def _intercept_async(
                 session,
                 model,
                 step,
-                kwargs,
+                live_kwargs,
                 ctx=ctx,
                 stream_buffer=stream_buffer,
             )
 
         normalized_kwargs = adapter.normalize_request(args, kwargs)
+
+        def _llm_call() -> Any:
+            # Rebuild call args so middleware modifications (PII redaction,
+            # Phase 1 strip) are reflected in the actual provider call.
+            live_args, live_kwargs = adapter.rebuild_call_args(
+                normalized_kwargs,
+                args,
+                kwargs,
+            )
+            return original(instance, *live_args, **live_kwargs)
 
         result = await gate.pipeline.execute_async(
             provider=adapter.name,
@@ -302,7 +372,7 @@ async def _intercept_async(
             request_kwargs=normalized_kwargs,
             session=session,
             config=gate.config,
-            llm_call=lambda: original(instance, *args, **kwargs),
+            llm_call=_llm_call,
             provider_base_url=provider_base_url,
         )
 
@@ -326,7 +396,7 @@ def _wrap_stream_sync(
     session: Any,
     model: str,
     step: int,
-    kwargs: dict,
+    kwargs: dict[str, Any],
     ctx: Any = None,
     stream_buffer: Any = None,
 ) -> Any:
@@ -441,7 +511,7 @@ async def _wrap_stream_async(
     session: Any,
     model: str,
     step: int,
-    kwargs: dict,
+    kwargs: dict[str, Any],
     ctx: Any = None,
     stream_buffer: Any = None,
 ) -> Any:
@@ -555,7 +625,7 @@ def wrap_instance(gate: Gate, adapter: ProviderAdapter, client: Any) -> None:
     for sub_object, method_name in targets:
         original = getattr(sub_object, method_name)
 
-        def _make_wrapper(_orig=original, _sub=sub_object):
+        def _make_wrapper(_orig: Any = original, _sub: Any = sub_object) -> Any:
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 return _intercept_sync(gate, adapter, _orig, _sub, args, kwargs)
 

@@ -100,13 +100,15 @@ class TestForceLocalDecision:
             assert decision.route_local is True
             assert "force-local mode" in decision.reason
 
-    def test_force_local_fallback_streaming(self, store):
-        """Force-local falls back to cloud for streaming."""
+    def test_force_local_handles_streaming(self, store):
+        """Force-local converts streaming to non-streaming and routes locally."""
         mw = self._make_mw(store, auto_route_force_local=True)
-        ctx = _make_ctx(config=mw._config, is_streaming=True)
-        decision = mw._should_route_local(ctx)
-        assert decision.route_local is False
-        assert "streaming" in decision.reason
+        with patch.object(mw, "_check_ollama_available", return_value=True):
+            ctx = _make_ctx(config=mw._config, is_streaming=True)
+            decision = mw._should_route_local(ctx)
+            assert decision.route_local is True
+            assert "force-local mode" in decision.reason
+            assert ctx.is_streaming is False
 
     def test_force_local_fallback_tools(self, store):
         """Force-local falls back to cloud when tools are present."""

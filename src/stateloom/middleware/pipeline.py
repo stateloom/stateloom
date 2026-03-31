@@ -85,15 +85,21 @@ class Pipeline:
 
         logger.debug(
             "Pipeline execute: session=%s provider=%s model=%s streaming=%s middlewares=%d",
-            ctx.session.id, ctx.provider, ctx.model, ctx.is_streaming, len(self.middlewares),
+            ctx.session.id,
+            ctx.provider,
+            ctx.model,
+            ctx.is_streaming,
+            len(self.middlewares),
         )
 
-        async def build_chain(index: int) -> Callable:
+        async def build_chain(index: int) -> Callable[..., Any]:
             async def call_next(c: MiddlewareContext) -> Any:
                 if index >= len(self.middlewares):
                     # Terminal: make the actual LLM call (or return cached)
                     if c.skip_call and c.cached_response is not None:
-                        logger.debug("Pipeline terminal: returning cached response (skip_call=True)")
+                        logger.debug(
+                            "Pipeline terminal: returning cached response (skip_call=True)"
+                        )
                         return c.cached_response
                     return await self._execute_llm_call(c, llm_call)
                 return await self.middlewares[index].process(c, await build_chain(index + 1))
@@ -104,7 +110,9 @@ class Pipeline:
         result = await chain(ctx)
         logger.debug(
             "Pipeline complete: session=%s latency=%.1fms tokens=%d",
-            ctx.session.id, ctx.latency_ms, ctx.prompt_tokens + ctx.completion_tokens,
+            ctx.session.id,
+            ctx.latency_ms,
+            ctx.prompt_tokens + ctx.completion_tokens,
         )
         return result
 
@@ -141,7 +149,9 @@ class Pipeline:
         except Exception as exc:
             logger.warning(
                 "LLM call failed: session=%s model=%s error=%s",
-                ctx.session.id, ctx.model, type(exc).__name__,
+                ctx.session.id,
+                ctx.model,
+                type(exc).__name__,
             )
             raise
         finally:
@@ -286,7 +296,7 @@ class Pipeline:
         after stream exhaustion.
         """
 
-        async def build_chain(index: int) -> Callable:
+        async def build_chain(index: int) -> Callable[..., Any]:
             async def call_next(c: MiddlewareContext) -> Any:
                 if index >= len(self.middlewares):
                     # No-op terminal — streaming will be handled by the caller

@@ -95,6 +95,21 @@ class NLIInjectionClassifier:
             self._initialized = True
             return False
 
+    @staticmethod
+    def _softmax_entailment(logits: Any) -> float:
+        """Extract entailment probability from 3-class NLI logits.
+
+        NLI CrossEncoder outputs [contradiction, entailment, neutral].
+        Apply softmax and return the entailment (index 1) probability.
+        """
+        import math
+
+        c, e, n = float(logits[0]), float(logits[1]), float(logits[2])
+        m = max(c, e, n)
+        exp_c, exp_e, exp_n = math.exp(c - m), math.exp(e - m), math.exp(n - m)
+        total = exp_c + exp_e + exp_n
+        return exp_e / total
+
     def classify(self, text: str) -> float | None:
         """Classify injection risk on a 0.0-1.0 scale.
 
@@ -118,8 +133,15 @@ class NLIInjectionClassifier:
                 ]
             )
 
-            injection_score = float(scores[0])
-            normal_score = float(scores[1])
+            # CrossEncoder returns (N, 3) logits [contradiction, entailment, neutral].
+            # Apply softmax per row, extract entailment probability for each pair.
+            if hasattr(scores, "shape") and len(scores.shape) == 2:
+                injection_score = self._softmax_entailment(scores[0])
+                normal_score = self._softmax_entailment(scores[1])
+            else:
+                # Fallback: older models that return scalar scores per pair
+                injection_score = float(scores[0])
+                normal_score = float(scores[1])
 
             # Avoid division by zero
             total = injection_score + normal_score

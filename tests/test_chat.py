@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import types
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -178,10 +179,7 @@ class TestContentExtraction:
         assert _extract_content(resp, "openai") == "dict content"
 
     def test_empty_choices(self):
-        resp = MagicMock()
-        resp.choices = []
-        resp.text = None
-        resp.content = None
+        resp = types.SimpleNamespace(choices=[], text=None, content=None)
         assert _extract_content(resp, "openai") == ""
 
 

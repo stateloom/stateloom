@@ -111,9 +111,7 @@ class MiddlewareContext:
     # Framework-specific metadata (e.g., LangChain run_id, tags, chain name).
     # Keyed by framework name: {"langchain": {...}, "langgraph": {...}}.
     # Populated by Pipeline from the ContextVar; flowed into event.metadata by CostTracker.
-    _framework_context: dict[str, Any] = field(
-        default_factory=dict, repr=False, init=False
-    )
+    _framework_context: dict[str, Any] = field(default_factory=dict, repr=False, init=False)
 
 
 @runtime_checkable

@@ -7,16 +7,16 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-logger = logging.getLogger("stateloom.middleware.cost_tracker")
-
 from stateloom.core.event import CacheHitEvent, LLMCallEvent
 from stateloom.middleware.base import MiddlewareContext
 from stateloom.pricing.registry import PricingRegistry
 
+logger = logging.getLogger("stateloom.middleware.cost_tracker")
+
 _SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
 
 
-def _extract_prompt_preview(messages: list[dict]) -> str:
+def _extract_prompt_preview(messages: list[dict[str, Any]]) -> str:
     """Extract a short preview of the last user message, stripping system-reminder tags."""
     for msg in reversed(messages):
         if msg.get("role") != "user":
@@ -39,7 +39,7 @@ def _extract_prompt_preview(messages: list[dict]) -> str:
     return ""
 
 
-def _extract_tool_preview(messages: list[dict]) -> str:
+def _extract_tool_preview(messages: list[dict[str, Any]]) -> str:
     """Extract a preview for tool-continuation calls.
 
     Shows the last assistant's tool call names and reasoning text instead of
@@ -89,7 +89,7 @@ def _extract_tool_preview(messages: list[dict]) -> str:
     return ""
 
 
-def _is_tool_continuation(messages: list[dict]) -> bool:
+def _is_tool_continuation(messages: list[dict[str, Any]]) -> bool:
     """Check if the **last** message contains tool results (tool-use continuation).
 
     Only the last message matters — earlier tool results in conversation history
@@ -250,8 +250,12 @@ class CostTracker:
 
         logger.debug(
             "Cost tracked: session=%s model=%s tokens=%d+%d cost=%.6f api_cost=%.6f%s",
-            ctx.session.id, ctx.model, prompt_tokens, completion_tokens,
-            actual_cost, api_cost,
+            ctx.session.id,
+            ctx.model,
+            prompt_tokens,
+            completion_tokens,
+            actual_cost,
+            api_cost,
             " (tool_continuation)" if is_tool_continuation else "",
         )
 
@@ -307,7 +311,7 @@ class CostTracker:
         return (0, 0)
 
     @staticmethod
-    def _extract_tokens_from_dict(data: dict) -> tuple[int, int]:
+    def _extract_tokens_from_dict(data: dict[str, Any]) -> tuple[int, int]:
         """Extract token counts from a dict response (passthrough proxy).
 
         Handles OpenAI, Anthropic, and Gemini response formats.

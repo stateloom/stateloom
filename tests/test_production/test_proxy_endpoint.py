@@ -102,7 +102,7 @@ def test_proxy_401_invalid_key(e2e_gate):
     resp = client.post(
         "/v1/chat/completions",
         json={"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": "Hi"}]},
-        headers={"Authorization": "Bearer agk-invalid-key-12345"},
+        headers={"Authorization": "Bearer ag-invalid-key-12345"},
     )
     assert resp.status_code == 401
 

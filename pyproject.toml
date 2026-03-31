@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stateloom"
-version = "0.1.1"
+dynamic = ["version"]
 description = "The control plane for AI agents. Track, secure, and optimize every agent run."
 readme = "README.md"
 license = "Apache-2.0"
@@ -71,6 +71,9 @@ stateloom = "stateloom.cli:main"
 [project.urls]
 Homepage = "https://github.com/stateloom/stateloom"
 Documentation = "https://docs.stateloom.io"
+
+[tool.hatch.version]
+path = "src/stateloom/_version.py"
 
 [tool.hatch.build.targets.sdist]
 include = [

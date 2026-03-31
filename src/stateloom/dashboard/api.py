@@ -7,8 +7,9 @@ import json as json_module
 import logging
 import queue
 import threading
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -48,6 +49,7 @@ class ConfigUpdate(BaseModel):
     cache_semantic_enabled: bool | None = None
     cache_similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     cache_scope: str | None = Field(default=None, max_length=32)
+    loop_detection_enabled: bool | None = None
     loop_exact_threshold: int | None = Field(default=None, ge=0, le=1000)
     store_retention_days: int | None = Field(default=None, ge=1, le=3650)
     console_verbose: bool | None = None
@@ -79,28 +81,28 @@ class HotSwapRequest(BaseModel):
 class CreateOrgRequest(BaseModel):
     name: str = Field(default="", max_length=256)
     budget: float | None = None
-    pii_rules: list[dict] = Field(default_factory=list)
-    metadata: dict = Field(default_factory=dict)
+    pii_rules: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpdateOrgRequest(BaseModel):
     name: str | None = Field(default=None, max_length=256)
     budget: float | None = None
-    pii_rules: list[dict] | None = None
-    metadata: dict | None = None
+    pii_rules: list[dict[str, Any]] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class CreateTeamRequest(BaseModel):
     org_id: str = Field(..., min_length=1, max_length=256)
     name: str = Field(default="", max_length=256)
     budget: float | None = None
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpdateTeamRequest(BaseModel):
     name: str | None = Field(default=None, max_length=256)
     budget: float | None = None
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class UpdateTeamRateLimitRequest(BaseModel):
@@ -131,8 +133,8 @@ class PurgeRequest(BaseModel):
 class SubmitJobRequest(BaseModel):
     provider: str = Field(default="", max_length=64)
     model: str = Field(default="", max_length=256)
-    messages: list[dict] = Field(default_factory=list)
-    request_kwargs: dict = Field(default_factory=dict)
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    request_kwargs: dict[str, Any] = Field(default_factory=dict)
     webhook_url: str = Field(default="", max_length=2048)
     webhook_secret: str = Field(default="", max_length=256)
     session_id: str = Field(default="", max_length=256)
@@ -140,14 +142,14 @@ class SubmitJobRequest(BaseModel):
     team_id: str = Field(default="", max_length=256)
     max_retries: int = Field(default=3, ge=0, le=10)
     ttl_seconds: int = Field(default=3600, ge=60, le=86400)
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateVirtualKeyRequest(BaseModel):
     team_id: str = Field(..., min_length=1, max_length=256)
     name: str = Field(default="", max_length=256)
     scopes: list[str] = Field(default_factory=list)
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     rate_limit_tps: float | None = Field(default=None, ge=0.1, le=10000)
     rate_limit_max_queue: int = Field(default=100, ge=1, le=10000)
     rate_limit_queue_timeout: float = Field(default=30.0, ge=1.0, le=300.0)
@@ -163,17 +165,17 @@ class CreateAgentRequest(BaseModel):
     description: str = Field(default="", max_length=4096)
     model: str = Field(..., min_length=1)
     system_prompt: str = Field(default="", max_length=65536)
-    request_overrides: dict = Field(default_factory=dict)
+    request_overrides: dict[str, Any] = Field(default_factory=dict)
     budget_per_session: float | None = None
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateAgentVersionRequest(BaseModel):
     model: str = Field(..., min_length=1)
     system_prompt: str = Field(default="", max_length=65536)
-    request_overrides: dict = Field(default_factory=dict)
+    request_overrides: dict[str, Any] = Field(default_factory=dict)
     budget_per_session: float | None = None
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_by: str = Field(default="", max_length=256)
 
 
@@ -184,7 +186,7 @@ class LockSettingRequest(BaseModel):
 
 
 class ImportSessionRequest(BaseModel):
-    bundle: dict
+    bundle: dict[str, Any]
     session_id_override: str | None = None
 
 
@@ -192,7 +194,7 @@ class UpdateAgentRequest(BaseModel):
     name: str | None = Field(default=None, max_length=256)
     description: str | None = Field(default=None, max_length=4096)
     status: str | None = None
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class ShadowConfigureRequest(BaseModel):
@@ -207,8 +209,8 @@ class VariantConfigRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     weight: float = Field(default=1.0, ge=0.0)
     model: str | None = Field(default=None, max_length=256)
-    request_overrides: dict = Field(default_factory=dict)
-    metadata: dict = Field(default_factory=dict)
+    request_overrides: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     agent_version_id: str | None = Field(default=None, max_length=256)
 
 
@@ -217,7 +219,7 @@ class CreateExperimentRequest(BaseModel):
     variants: list[VariantConfigRequest] = Field(..., min_length=1)
     strategy: str = Field(default="random", max_length=32)
     description: str = Field(default="", max_length=4096)
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     agent_id: str | None = Field(default=None, max_length=256)
 
 
@@ -226,7 +228,7 @@ class UpdateExperimentRequest(BaseModel):
     description: str | None = Field(default=None, max_length=4096)
     variants: list[VariantConfigRequest] | None = None
     strategy: str | None = Field(default=None, max_length=32)
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
     agent_id: str | None = Field(default=None, max_length=256)
 
 
@@ -296,7 +298,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         _shadow_deps = [Depends(require_feature(_registry, "model_testing"))]
 
     # In-memory pull progress tracking
-    _pull_progress: dict[str, dict] = {}
+    _pull_progress: dict[str, dict[str, Any]] = {}
     _pull_lock = threading.Lock()
 
     # In-memory hot-swap state
@@ -328,7 +330,7 @@ def create_api_router(gate: Gate) -> APIRouter:
             if hasattr(gate, "_auto_router") and gate._auto_router is not None:
                 gate.pipeline.remove(gate._auto_router)
                 gate._auto_router.shutdown()
-                gate._auto_router = None
+                gate._auto_router = None  # type: ignore[assignment]
         else:
             gate.config.auto_route_enabled = enabled
 
@@ -339,7 +341,7 @@ def create_api_router(gate: Gate) -> APIRouter:
                 mw.reload_rules()
 
     @router.get("/health")
-    async def health():
+    async def health() -> dict[str, Any]:
         ready = True
         checks: dict[str, str] = {}
 
@@ -360,7 +362,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/features")
-    async def feature_status():
+    async def feature_status() -> dict[str, Any]:
         """List all features with tier, availability, and upgrade hints."""
         if _registry is None:
             return {"features": [], "summary": {"community": 0, "enterprise": 0, "unlocked": 0}}
@@ -409,7 +411,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         org_id: str | None = Query(default=None),
         team_id: str | None = Query(default=None),
         end_user: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         sessions = gate.store.list_sessions(
             limit=limit,
             offset=offset,
@@ -422,7 +424,10 @@ def create_api_router(gate: Gate) -> APIRouter:
         # (e.g. Gemini CLI init requests).
         visible = [s for s in sessions if not s.metadata.get("_cli_internal_only")]
         total = gate.store.count_sessions(
-            status=status, org_id=org_id, team_id=team_id, end_user=end_user,
+            status=status,
+            org_id=org_id,
+            team_id=team_id,
+            end_user=end_user,
         )
         return {
             "sessions": [_session_to_dict(gate, s) for s in visible],
@@ -432,7 +437,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/sessions/{session_id}")
-    async def get_session(session_id: str):
+    async def get_session(session_id: str) -> dict[str, Any]:
         session = gate.store.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -488,7 +493,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         ),
         limit: int = Query(default=1000, le=5000),
         offset: int = Query(default=0, ge=0),
-    ):
+    ) -> dict[str, Any]:
         # When primary_only, fetch a larger batch internally to compute summaries
         if primary_only:
             fetch_limit = limit * 5
@@ -498,20 +503,23 @@ def create_api_router(gate: Gate) -> APIRouter:
             # Fetch one extra to detect has_more
             fetch_limit = limit + 1
         events = gate.store.get_session_events(
-            session_id, event_type=event_type, limit=fetch_limit, offset=offset,
+            session_id,
+            event_type=event_type,
+            limit=fetch_limit,
+            offset=offset,
         )
         if exclude_types:
             excluded = {t.strip() for t in exclude_types.split(",")}
             events = [e for e in events if e.event_type.value not in excluded]
 
         if primary_only:
-            primary_events, tool_summaries = _compute_tool_summaries(events)
+            primary_events, tool_summaries = _compute_tool_summaries(events)  # type: ignore[arg-type]
             has_more = len(primary_events) > limit
             primary_events = primary_events[:limit]
             result = []
             for e in primary_events:
                 d = _event_to_dict(e)
-                step = e.step
+                step = e.step  # type: ignore[attr-defined]
                 if step in tool_summaries:
                     d["_tool_summary"] = tool_summaries[step]
                 result.append(d)
@@ -531,7 +539,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         parent_step: int = Query(..., description="Step number of the parent user-prompt event"),
         limit: int = Query(default=200, le=1000),
         offset: int = Query(default=0, ge=0),
-    ):
+    ) -> dict[str, Any]:
         """Return tool-continuation and ToolCall events that follow a parent step.
 
         Collects both ``is_tool_continuation=True`` LLM calls (proxy tool-use)
@@ -574,7 +582,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     async def get_session_children(
         session_id: str,
         limit: int = Query(default=100, le=500),
-    ):
+    ) -> dict[str, Any]:
         children = gate.store.list_child_sessions(session_id, limit=limit)
         return {
             "children": [_session_to_dict(gate, s) for s in children],
@@ -582,7 +590,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.post("/sessions/{session_id}/cancel")
-    async def cancel_session(session_id: str):
+    async def cancel_session(session_id: str) -> dict[str, Any]:
         result = gate.cancel_session(session_id)
         if not result:
             session = gate.store.get_session(session_id)
@@ -595,7 +603,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"status": "cancelled", "session_id": session_id}
 
     @router.post("/sessions/{session_id}/end")
-    async def end_session(session_id: str):
+    async def end_session(session_id: str) -> dict[str, Any]:
         result = gate.end_session(session_id)
         if not result:
             session = gate.store.get_session(session_id)
@@ -608,7 +616,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"status": "completed", "session_id": session_id}
 
     @router.post("/sessions/{session_id}/suspend")
-    async def suspend_session(session_id: str, request: Request):
+    async def suspend_session(session_id: str, request: Request) -> dict[str, Any]:
         body = {}
         try:
             body = await request.json()
@@ -628,7 +636,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"status": "suspended", "session_id": session_id}
 
     @router.post("/sessions/{session_id}/signal")
-    async def signal_session(session_id: str, request: Request):
+    async def signal_session(session_id: str, request: Request) -> dict[str, Any]:
         body = {}
         try:
             body = await request.json()
@@ -647,7 +655,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"status": "resumed", "session_id": session_id}
 
     @router.get("/stats")
-    async def get_stats():
+    async def get_stats() -> dict[str, Any]:
         stats = gate.store.get_global_stats()
         call_counts = gate.store.get_call_counts()
         stats["cloud_calls"] = call_counts["cloud_calls"]
@@ -657,13 +665,13 @@ def create_api_router(gate: Gate) -> APIRouter:
         return stats
 
     @router.get("/stats/cost-by-model")
-    async def get_cost_by_model():
+    async def get_cost_by_model() -> dict[str, Any]:
         return {"models": gate.store.get_cost_by_model()}
 
     @router.get("/models/cloud")
-    async def get_cloud_models():
+    async def get_cloud_models() -> dict[str, Any]:
         """Return supported cloud models from the pricing registry."""
-        models: list[dict[str, str]] = []
+        models: list[dict[str, Any]] = []
         for model_id in sorted(gate.pricing._prices):
             if (
                 model_id.startswith("gpt-")
@@ -691,7 +699,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     @router.get("/pii")
     async def get_pii_detections(
         limit: int = Query(default=100, le=500),
-    ):
+    ) -> dict[str, Any]:
         # Get PII events across all sessions
         events = gate.store.get_session_events("", event_type="pii_detection", limit=limit)
 
@@ -732,7 +740,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     @router.get("/experiments")
     async def list_experiments(
         status: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         experiments = gate.store.list_experiments(status=status)
         return {
             "experiments": [
@@ -753,7 +761,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/experiments/{experiment_id}")
-    async def get_experiment(experiment_id: str):
+    async def get_experiment(experiment_id: str) -> dict[str, Any]:
         experiment = gate.store.get_experiment(experiment_id)
         if experiment is None:
             raise HTTPException(status_code=404, detail="Experiment not found")
@@ -775,16 +783,16 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/experiments/{experiment_id}/metrics")
-    async def get_experiment_metrics(experiment_id: str):
+    async def get_experiment_metrics(experiment_id: str) -> dict[str, Any]:
         return gate.experiment_manager.get_metrics(experiment_id)
 
     @router.get("/leaderboard")
-    async def get_leaderboard():
+    async def get_leaderboard() -> dict[str, Any]:
         entries = gate.experiment_manager.get_leaderboard()
         return {"entries": entries}
 
     @router.post("/experiments")
-    async def create_experiment(body: CreateExperimentRequest):
+    async def create_experiment(body: CreateExperimentRequest) -> dict[str, Any]:
         try:
             experiment = gate.experiment_manager.create_experiment(
                 name=body.name,
@@ -808,7 +816,10 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.patch("/experiments/{experiment_id}")
-    async def update_experiment(experiment_id: str, body: UpdateExperimentRequest):
+    async def update_experiment(
+        experiment_id: str,
+        body: UpdateExperimentRequest,
+    ) -> dict[str, Any]:
         try:
             experiment = gate.experiment_manager.update_experiment(
                 experiment_id,
@@ -834,7 +845,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.post("/experiments/{experiment_id}/start")
-    async def start_experiment(experiment_id: str):
+    async def start_experiment(experiment_id: str) -> dict[str, Any]:
         try:
             experiment = gate.experiment_manager.start_experiment(experiment_id)
         except ValueError as exc:
@@ -842,7 +853,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"id": experiment.id, "status": experiment.status.value}
 
     @router.post("/experiments/{experiment_id}/pause")
-    async def pause_experiment(experiment_id: str):
+    async def pause_experiment(experiment_id: str) -> dict[str, Any]:
         try:
             experiment = gate.experiment_manager.pause_experiment(experiment_id)
         except ValueError as exc:
@@ -850,7 +861,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"id": experiment.id, "status": experiment.status.value}
 
     @router.post("/experiments/{experiment_id}/conclude")
-    async def conclude_experiment(experiment_id: str):
+    async def conclude_experiment(experiment_id: str) -> dict[str, Any]:
         try:
             metrics = gate.experiment_manager.conclude_experiment(experiment_id)
         except ValueError as exc:
@@ -858,7 +869,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"id": experiment_id, "status": "concluded", "metrics": metrics}
 
     @router.post("/sessions/{session_id}/feedback")
-    async def post_feedback(session_id: str, body: FeedbackRequest):
+    async def post_feedback(session_id: str, body: FeedbackRequest) -> dict[str, str]:
         gate.feedback(
             session_id=session_id,
             rating=body.rating,
@@ -868,7 +879,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"status": "ok"}
 
     @router.get("/sessions/{session_id}/feedback")
-    async def get_feedback(session_id: str):
+    async def get_feedback(session_id: str) -> dict[str, Any]:
         fb = gate.store.get_feedback(session_id)
         if fb is None:
             return {"feedback": None}
@@ -889,7 +900,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         session_id: str,
         include_children: bool = Query(default=False),
         scrub_pii: bool = Query(default=False),
-    ):
+    ) -> Any:
         from fastapi.responses import Response
 
         session = gate.store.get_session(session_id)
@@ -910,7 +921,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         )
 
     @router.post("/sessions/import")
-    async def import_session_bundle(request: ImportSessionRequest):
+    async def import_session_bundle(request: ImportSessionRequest) -> dict[str, Any]:
         from stateloom.core.errors import StateLoomError as _AGError
 
         try:
@@ -928,7 +939,7 @@ def create_api_router(gate: Gate) -> APIRouter:
 
     # --- Config endpoints ---
 
-    def _config_dict() -> dict:
+    def _config_dict() -> dict[str, Any]:
         """Return the current config as a dict (shared by GET and PATCH)."""
         return {
             "default_model": gate.config.default_model,
@@ -955,6 +966,7 @@ def create_api_router(gate: Gate) -> APIRouter:
             "cache_semantic_enabled": gate.config.cache.semantic_enabled,
             "cache_similarity_threshold": gate.config.cache.similarity_threshold,
             "cache_embedding_model": gate.config.cache.embedding_model,
+            "loop_detection_enabled": gate.config.loop_detection_enabled,
             "loop_exact_threshold": gate.config.loop_exact_threshold,
             "store_retention_days": gate.config.store_retention_days,
             "console_output": gate.config.console_output,
@@ -972,17 +984,17 @@ def create_api_router(gate: Gate) -> APIRouter:
             "blast_radius_budget_violations_per_hour": (
                 gate.config.blast_radius.budget_violations_per_hour
             ),
-            "_locked": [l["setting"] for l in gate.list_locked_settings()],
+            "_locked": [lk["setting"] for lk in gate.list_locked_settings()],
         }
 
     @router.get("/config")
-    async def get_config():
+    async def get_config() -> dict[str, Any]:
         return _config_dict()
 
     @router.patch("/config")
-    async def patch_config(body: ConfigUpdate):
+    async def patch_config(body: ConfigUpdate) -> dict[str, Any]:
         # Enforce admin locks — reject changes to locked settings
-        locks = {l["setting"]: l for l in gate.list_locked_settings()}
+        locks = {lk["setting"]: lk for lk in gate.list_locked_settings()}
         for field_name, value in body.model_dump(exclude_unset=True).items():
             if field_name in locks:
                 locked_value = json_module.loads(locks[field_name]["value"])
@@ -993,6 +1005,11 @@ def create_api_router(gate: Gate) -> APIRouter:
                     )
 
         if body.default_model is not None:
+            if _registry and not _registry.is_available("model_override"):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Emergency model override requires an enterprise license.",
+                )
             gate.config.default_model = body.default_model
         if body.local_model_enabled is not None:
             gate.config.local_model_enabled = body.local_model_enabled
@@ -1001,8 +1018,11 @@ def create_api_router(gate: Gate) -> APIRouter:
 
         # Gate shadow fields behind enterprise license
         _shadow_fields = {
-            "shadow_enabled", "shadow_model", "shadow_sample_rate",
-            "shadow_max_context_tokens", "shadow_models",
+            "shadow_enabled",
+            "shadow_model",
+            "shadow_sample_rate",
+            "shadow_max_context_tokens",
+            "shadow_models",
             "shadow_similarity_method",
         }
         submitted = body.model_dump(exclude_unset=True)
@@ -1048,8 +1068,8 @@ def create_api_router(gate: Gate) -> APIRouter:
                 from stateloom.middleware.pii_scanner import PIIScannerMiddleware
 
                 gate.config.pii_enabled = True
-                mw = PIIScannerMiddleware(gate.config, gate.store)
-                gate._pii_scanner = mw
+                mw = PIIScannerMiddleware(gate.config, gate.store)  # type: ignore[assignment]
+                gate._pii_scanner = mw  # type: ignore[attr-defined]
                 # Insert after kill switch and blast radius, before cache
                 from stateloom.middleware.cache import CacheMiddleware
 
@@ -1092,31 +1112,48 @@ def create_api_router(gate: Gate) -> APIRouter:
         # Cache settings
         if body.cache_max_size is not None:
             gate.config.cache_max_size = body.cache_max_size
-            for mw in gate.pipeline.middlewares:
+            for mw in gate.pipeline.middlewares:  # type: ignore[assignment]
                 if hasattr(mw, "_max_size"):
                     mw._max_size = body.cache_max_size
         if body.cache_ttl_seconds is not None:
             gate.config.cache_ttl_seconds = body.cache_ttl_seconds
-            for mw in gate.pipeline.middlewares:
+            for mw in gate.pipeline.middlewares:  # type: ignore[assignment]
                 if hasattr(mw, "_ttl_seconds"):
                     mw._ttl_seconds = body.cache_ttl_seconds
         if body.cache_semantic_enabled is not None:
             gate.config.cache_semantic_enabled = body.cache_semantic_enabled
         if body.cache_similarity_threshold is not None:
             gate.config.cache_similarity_threshold = body.cache_similarity_threshold
-            for mw in gate.pipeline.middlewares:
+            for mw in gate.pipeline.middlewares:  # type: ignore[assignment]
                 if hasattr(mw, "_similarity_threshold"):
                     mw._similarity_threshold = body.cache_similarity_threshold
         if body.cache_scope is not None:
-            gate.config.cache_scope = body.cache_scope
-            for mw in gate.pipeline.middlewares:
+            gate.config.cache_scope = body.cache_scope  # type: ignore[assignment]
+            for mw in gate.pipeline.middlewares:  # type: ignore[assignment]
                 if hasattr(mw, "_scope"):
                     mw._scope = body.cache_scope
 
         # Loop detection settings
+        if body.loop_detection_enabled is not None:
+            gate.config.loop_detection_enabled = body.loop_detection_enabled
+            if body.loop_detection_enabled:
+                # Add LoopDetector if not already present
+                has_loop = any(hasattr(mw, "_threshold") for mw in gate.pipeline.middlewares)
+                if not has_loop:
+                    try:
+                        from stateloom.middleware.loop_detector import LoopDetector
+
+                        gate.pipeline.add(LoopDetector(gate.config, store=gate.store))
+                    except ImportError:
+                        pass
+            else:
+                # Remove LoopDetector from pipeline
+                gate.pipeline.middlewares = [
+                    mw for mw in gate.pipeline.middlewares if not hasattr(mw, "_threshold")
+                ]
         if body.loop_exact_threshold is not None:
             gate.config.loop_exact_threshold = body.loop_exact_threshold
-            for mw in gate.pipeline.middlewares:
+            for mw in gate.pipeline.middlewares:  # type: ignore[assignment]
                 if hasattr(mw, "_threshold"):
                     mw._threshold = body.loop_exact_threshold
 
@@ -1133,15 +1170,44 @@ def create_api_router(gate: Gate) -> APIRouter:
             _toggle_auto_route(body.auto_route_enabled)
         if body.auto_route_force_local is not None:
             gate.config.auto_route_force_local = body.auto_route_force_local
-            # Auto-enable auto_route when force_local is turned on
-            if body.auto_route_force_local and not gate.config.auto_route_enabled:
-                _toggle_auto_route(True)
+            if body.auto_route_force_local:
+                # Auto-select first downloaded model if none is set
+                if not gate.config.local_model_default and not gate.config.auto_route_model:
+                    try:
+                        from stateloom.local.client import OllamaClient
+
+                        client = OllamaClient(host=gate.config.local_model_host)
+                        try:
+                            models = client.list_models()
+                        finally:
+                            client.close()
+                        if models:
+                            first_model = models[0].get("name", "")
+                            if first_model:
+                                gate.config.local_model_default = first_model
+                    except Exception:
+                        pass  # Ollama unavailable — user must select manually
+                # Auto-enable auto_route when force_local is turned on
+                if not gate.config.auto_route_enabled:
+                    _toggle_auto_route(True)
         if body.auto_route_model is not None:
             gate.config.auto_route_model = body.auto_route_model
         if body.auto_route_complexity_threshold is not None:
             gate.config.auto_route_complexity_threshold = body.auto_route_complexity_threshold
         if body.auto_route_probe_enabled is not None:
             gate.config.auto_route_probe_enabled = body.auto_route_probe_enabled
+
+        # Persist local routing config if any relevant field changed
+        if any(
+            getattr(body, f, None) is not None
+            for f in (
+                "auto_route_enabled",
+                "auto_route_force_local",
+                "local_model_default",
+                "auto_route_model",
+            )
+        ):
+            _persist_local_routing_state(gate)
 
         # Kill switch settings
         ks_changed = False
@@ -1152,7 +1218,7 @@ def create_api_router(gate: Gate) -> APIRouter:
             gate.config.kill_switch_message = body.kill_switch_message
             ks_changed = True
         if body.kill_switch_response_mode is not None:
-            gate.config.kill_switch_response_mode = body.kill_switch_response_mode
+            gate.config.kill_switch_response_mode = body.kill_switch_response_mode  # type: ignore[assignment]
             ks_changed = True
         if ks_changed:
             _persist_kill_switch_state(gate)
@@ -1182,14 +1248,14 @@ def create_api_router(gate: Gate) -> APIRouter:
                 if val:
                     gate.store.save_secret(f"provider_key_{provider}", val)
                 else:
-                    gate.store.delete_secret(f"provider_key_{provider}")
+                    gate.store.delete_secret(f"provider_key_{provider}")  # type: ignore[attr-defined]
 
         return _config_dict()
 
     # --- Admin lock endpoints ---
 
     @router.post("/admin/locks", status_code=201)
-    async def create_admin_lock(body: LockSettingRequest):
+    async def create_admin_lock(body: LockSettingRequest) -> dict[str, Any]:
         valid_fields = set(ConfigUpdate.model_fields.keys())
         if body.setting not in valid_fields:
             raise HTTPException(
@@ -1205,11 +1271,11 @@ def create_api_router(gate: Gate) -> APIRouter:
         return lock
 
     @router.get("/admin/locks")
-    async def list_admin_locks():
+    async def list_admin_locks() -> dict[str, Any]:
         return {"locks": gate.list_locked_settings()}
 
     @router.delete("/admin/locks/{setting}")
-    async def delete_admin_lock(setting: str):
+    async def delete_admin_lock(setting: str) -> dict[str, str]:
         removed = gate.unlock_setting(setting)
         if not removed:
             raise HTTPException(status_code=404, detail="Lock not found")
@@ -1218,8 +1284,8 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Provider API key endpoints ---
 
     @router.get("/provider-keys")
-    async def get_provider_keys():
-        def status(key: str) -> dict:
+    async def get_provider_keys() -> dict[str, Any]:
+        def status(key: str) -> dict[str, bool]:
             return {"set": bool(key)}
 
         return {
@@ -1231,7 +1297,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Local model endpoints ---
 
     @router.get("/local/status")
-    async def local_status():
+    async def local_status() -> dict[str, Any]:
         from stateloom.local.client import OllamaClient
 
         client = OllamaClient(host=gate.config.local_model_host)
@@ -1255,7 +1321,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/local/models")
-    async def list_local_models():
+    async def list_local_models() -> dict[str, Any]:
         from stateloom.local.client import OllamaClient
 
         client = OllamaClient(host=gate.config.local_model_host)
@@ -1268,7 +1334,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"models": models}
 
     @router.get("/local/recommend")
-    async def recommend_local_models():
+    async def recommend_local_models() -> dict[str, Any]:
         from stateloom.local.hardware import detect_hardware
         from stateloom.local.hardware import recommend_models as _recommend
 
@@ -1288,21 +1354,21 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.post("/local/pull")
-    async def pull_local_model(body: PullRequest):
+    async def pull_local_model(body: PullRequest) -> StreamingResponse:
         from stateloom.local.client import OllamaClient
 
-        q: queue.Queue[dict | None] = queue.Queue(maxsize=200)
+        q: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=200)
         cancelled = threading.Event()
 
         with _pull_lock:
             _pull_progress[body.model] = {"status": "pulling", "progress_pct": 0}
 
-        def _pull_thread():
+        def _pull_thread() -> None:
             client = OllamaClient(host=gate.config.local_model_host, timeout=600.0)
             max_pct = 0.0
             try:
 
-                def cb(data: dict) -> None:
+                def cb(data: dict[str, Any]) -> None:
                     nonlocal max_pct
                     if cancelled.is_set():
                         return
@@ -1349,7 +1415,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         thread = threading.Thread(target=_pull_thread, daemon=True)
         thread.start()
 
-        async def _stream():
+        async def _stream() -> AsyncIterator[str]:
             try:
                 loop = asyncio.get_running_loop()
                 while True:
@@ -1376,7 +1442,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         )
 
     @router.get("/local/pull/{model:path}/progress")
-    async def pull_progress(model: str):
+    async def pull_progress(model: str) -> dict[str, Any]:
         with _pull_lock:
             state = _pull_progress.get(model)
         if state is None:
@@ -1386,7 +1452,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Hot-swap endpoint ---
 
     @router.post("/local/hot-swap")
-    async def start_hot_swap(body: HotSwapRequest):
+    async def start_hot_swap(body: HotSwapRequest) -> dict[str, Any]:
         with _hot_swap.lock:
             if _hot_swap.active:
                 raise HTTPException(status_code=409, detail="Hot-swap already in progress")
@@ -1400,14 +1466,14 @@ def create_api_router(gate: Gate) -> APIRouter:
             _hot_swap.progress_pct = 0.0
             _hot_swap.error = ""
 
-        def _swap():
+        def _swap() -> None:
             from stateloom.dashboard.ws import broadcast_sync
             from stateloom.local.client import OllamaClient
 
             client = OllamaClient(host=gate.config.local_model_host, timeout=600.0)
             try:
                 # Phase: pulling
-                def cb(data: dict) -> None:
+                def cb(data: dict[str, Any]) -> None:
                     total = data.get("total", 0)
                     completed = data.get("completed", 0)
                     with _hot_swap.lock:
@@ -1494,7 +1560,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/local/hot-swap")
-    async def get_hot_swap_status():
+    async def get_hot_swap_status() -> dict[str, Any]:
         with _hot_swap.lock:
             return {
                 "active": _hot_swap.active,
@@ -1506,7 +1572,7 @@ def create_api_router(gate: Gate) -> APIRouter:
             }
 
     @router.delete("/local/models/{model}")
-    async def delete_local_model(model: str):
+    async def delete_local_model(model: str) -> dict[str, str]:
         from stateloom.local.client import OllamaClient
 
         client = OllamaClient(host=gate.config.local_model_host)
@@ -1521,7 +1587,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Shadow metrics endpoint ---
 
     @router.get("/shadow/metrics", dependencies=_shadow_deps)
-    async def shadow_metrics():
+    async def shadow_metrics() -> dict[str, Any]:
         from stateloom.core.event import LocalRoutingEvent, ShadowDraftEvent
 
         # Query all shadow events, excluding cancelled ones (routed locally / cached)
@@ -1590,7 +1656,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         high_quality_pct = high_quality_count / similarity_count if similarity_count > 0 else 0.0
 
         # Per-model breakdown
-        by_model: dict[str, dict] = {}
+        by_model: dict[str, dict[str, Any]] = {}
         for e in events:
             if not isinstance(e, ShadowDraftEvent):
                 continue
@@ -1641,7 +1707,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/shadow/readiness", dependencies=_shadow_deps)
-    async def shadow_readiness():
+    async def shadow_readiness() -> dict[str, Any]:
         """Model testing readiness scores per candidate model.
 
         Scoring formula per model (0–100):
@@ -1669,7 +1735,7 @@ def create_api_router(gate: Gate) -> APIRouter:
                 by_model[model] = []
             by_model[model].append(e)
 
-        results: dict[str, dict] = {}
+        results: dict[str, dict[str, Any]] = {}
         for model, model_events in by_model.items():
             total = len(model_events)
             successes = [e for e in model_events if e.shadow_status == "success"]
@@ -1770,12 +1836,12 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"models": results}
 
     @router.get("/shadow/config", dependencies=_shadow_deps)
-    async def get_shadow_config():
+    async def get_shadow_config() -> dict[str, Any]:
         """Get current shadow drafting configuration."""
         return gate.shadow_status()
 
     @router.post("/shadow/configure", dependencies=_shadow_deps)
-    async def configure_shadow(body: ShadowConfigureRequest):
+    async def configure_shadow(body: ShadowConfigureRequest) -> dict[str, Any]:
         """Configure shadow drafting at runtime. Enterprise-gated."""
         return gate.configure_shadow(
             enabled=body.enabled,
@@ -1788,7 +1854,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Kill switch endpoints ---
 
     @router.get("/kill-switch")
-    async def get_kill_switch():
+    async def get_kill_switch() -> dict[str, Any]:
         return {
             "active": gate.config.kill_switch_active,
             "message": gate.config.kill_switch_message,
@@ -1799,24 +1865,24 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.post("/kill-switch/activate")
-    async def activate_kill_switch(body: KillSwitchActivateRequest | None = None):
+    async def activate_kill_switch(body: KillSwitchActivateRequest | None = None) -> dict[str, Any]:
         gate.config.kill_switch_active = True
         if body:
             if body.message is not None:
                 gate.config.kill_switch_message = body.message
             if body.response_mode is not None:
-                gate.config.kill_switch_response_mode = body.response_mode
+                gate.config.kill_switch_response_mode = body.response_mode  # type: ignore[assignment]
         _persist_kill_switch_state(gate)
         return {"status": "activated", "active": True}
 
     @router.post("/kill-switch/deactivate")
-    async def deactivate_kill_switch():
+    async def deactivate_kill_switch() -> dict[str, Any]:
         gate.config.kill_switch_active = False
         _persist_kill_switch_state(gate)
         return {"status": "deactivated", "active": False}
 
     @router.post("/kill-switch/rules")
-    async def add_kill_switch_rule(body: KillSwitchRuleRequest):
+    async def add_kill_switch_rule(body: KillSwitchRuleRequest) -> dict[str, Any]:
         from stateloom.core.config import KillSwitchRule
 
         rule = KillSwitchRule(**body.model_dump())
@@ -1825,7 +1891,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"status": "added", "rule_count": len(gate.config.kill_switch_rules)}
 
     @router.put("/kill-switch/rules")
-    async def replace_kill_switch_rules(body: KillSwitchRulesReplaceRequest):
+    async def replace_kill_switch_rules(body: KillSwitchRulesReplaceRequest) -> dict[str, Any]:
         from stateloom.core.config import KillSwitchRule
 
         gate.config.kill_switch_rules = [KillSwitchRule(**r.model_dump()) for r in body.rules]
@@ -1833,7 +1899,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"status": "replaced", "rule_count": len(gate.config.kill_switch_rules)}
 
     @router.delete("/kill-switch/rules")
-    async def clear_kill_switch_rules():
+    async def clear_kill_switch_rules() -> dict[str, Any]:
         gate.config.kill_switch_rules.clear()
         _persist_kill_switch_state(gate)
         return {"status": "cleared", "rule_count": 0}
@@ -1841,15 +1907,25 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- PII rule endpoints ---
 
     @router.get("/pii/rules")
-    async def get_pii_rules():
+    async def get_pii_rules() -> dict[str, Any]:
         return {
             "rules": [r.model_dump() for r in gate.config.pii.rules],
             "pii_enabled": gate.config.pii.enabled,
             "pii_default_mode": gate.config.pii.default_mode.value,
         }
 
+    def _pii_init_warning() -> dict[str, str] | None:
+        """Return a warning if PII rules were set via init() (code takes precedence)."""
+        for mw in gate.pipeline.middlewares:
+            if hasattr(mw, "_rules_from_init") and mw._rules_from_init:
+                return {
+                    "warning": "PII rules were set via init(). API changes apply to "
+                    "this process but init() rules will take precedence on restart."
+                }
+        return None
+
     @router.post("/pii/rules")
-    async def add_pii_rule(body: PIIRuleRequest):
+    async def add_pii_rule(body: PIIRuleRequest) -> dict[str, Any]:
         from stateloom.core.config import PIIRule
 
         rule_data: dict[str, Any] = {
@@ -1864,10 +1940,14 @@ def create_api_router(gate: Gate) -> APIRouter:
         gate.config.pii_rules.append(rule)
         _reload_pii_middleware()
         _persist_pii_state(gate)
-        return {"status": "added", "rule_count": len(gate.config.pii_rules)}
+        result: dict[str, Any] = {"status": "added", "rule_count": len(gate.config.pii_rules)}
+        warning = _pii_init_warning()
+        if warning:
+            result.update(warning)
+        return result
 
     @router.put("/pii/rules")
-    async def replace_pii_rules(body: PIIRulesReplaceRequest):
+    async def replace_pii_rules(body: PIIRulesReplaceRequest) -> dict[str, Any]:
         from stateloom.core.config import PIIRule
 
         rules = []
@@ -1887,14 +1967,14 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"status": "replaced", "rule_count": len(gate.config.pii_rules)}
 
     @router.delete("/pii/rules")
-    async def clear_pii_rules():
+    async def clear_pii_rules() -> dict[str, Any]:
         gate.config.pii_rules.clear()
         _reload_pii_middleware()
         _persist_pii_state(gate)
         return {"status": "cleared", "rule_count": 0}
 
     @router.delete("/pii/rules/{pattern}")
-    async def delete_pii_rule(pattern: str):
+    async def delete_pii_rule(pattern: str) -> dict[str, Any]:
         gate.config.pii_rules = [r for r in gate.config.pii_rules if r.pattern != pattern]
         _reload_pii_middleware()
         _persist_pii_state(gate)
@@ -1903,7 +1983,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Organization endpoints ---
 
     @router.get("/organizations")
-    async def list_organizations():
+    async def list_organizations() -> dict[str, Any]:
         orgs = gate.list_organizations()
         return {
             "organizations": [_org_to_dict(o) for o in orgs],
@@ -1911,7 +1991,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.post("/organizations", dependencies=_mt_deps)
-    async def create_organization(body: CreateOrgRequest):
+    async def create_organization(body: CreateOrgRequest) -> dict[str, Any]:
         from stateloom.core.config import PIIRule as PIIRuleModel
 
         pii_rules = [PIIRuleModel(**r) for r in body.pii_rules] if body.pii_rules else []
@@ -1924,7 +2004,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return _org_to_dict(org)
 
     @router.get("/organizations/{org_id}")
-    async def get_organization(org_id: str):
+    async def get_organization(org_id: str) -> dict[str, Any]:
         org = gate.get_organization(org_id)
         if org is None:
             raise HTTPException(status_code=404, detail="Organization not found")
@@ -1933,7 +2013,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return result
 
     @router.patch("/organizations/{org_id}")
-    async def update_organization(org_id: str, body: UpdateOrgRequest):
+    async def update_organization(org_id: str, body: UpdateOrgRequest) -> dict[str, Any]:
         org = gate.get_organization(org_id)
         if org is None:
             raise HTTPException(status_code=404, detail="Organization not found")
@@ -1951,7 +2031,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return _org_to_dict(org)
 
     @router.get("/organizations/{org_id}/teams")
-    async def list_org_teams(org_id: str):
+    async def list_org_teams(org_id: str) -> dict[str, Any]:
         teams = gate.list_teams(org_id=org_id)
         return {
             "teams": [_team_to_dict(t) for t in teams],
@@ -1963,7 +2043,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         org_id: str,
         limit: int = Query(default=50, le=500),
         offset: int = Query(default=0, ge=0),
-    ):
+    ) -> dict[str, Any]:
         sessions = gate.store.list_sessions(limit=limit, offset=offset, org_id=org_id)
         return {
             "sessions": [_session_to_dict(gate, s) for s in sessions],
@@ -1975,7 +2055,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     @router.get("/teams")
     async def list_all_teams(
         org_id: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         teams = gate.list_teams(org_id=org_id)
         return {
             "teams": [_team_to_dict(t) for t in teams],
@@ -1983,7 +2063,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.post("/teams", dependencies=_mt_deps)
-    async def create_team(body: CreateTeamRequest):
+    async def create_team(body: CreateTeamRequest) -> dict[str, Any]:
         try:
             from stateloom.ee.setup import _check_dev_scale_cap
 
@@ -2001,7 +2081,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return _team_to_dict(team)
 
     @router.get("/teams/{team_id}")
-    async def get_team(team_id: str):
+    async def get_team(team_id: str) -> dict[str, Any]:
         team = gate.get_team(team_id)
         if team is None:
             raise HTTPException(status_code=404, detail="Team not found")
@@ -2010,7 +2090,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return result
 
     @router.patch("/teams/{team_id}")
-    async def update_team(team_id: str, body: UpdateTeamRequest):
+    async def update_team(team_id: str, body: UpdateTeamRequest) -> dict[str, Any]:
         team = gate.get_team(team_id)
         if team is None:
             raise HTTPException(status_code=404, detail="Team not found")
@@ -2028,7 +2108,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         team_id: str,
         limit: int = Query(default=50, le=500),
         offset: int = Query(default=0, ge=0),
-    ):
+    ) -> dict[str, Any]:
         sessions = gate.store.list_sessions(limit=limit, offset=offset, team_id=team_id)
         return {
             "sessions": [_session_to_dict(gate, s) for s in sessions],
@@ -2038,7 +2118,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Blast radius endpoints ---
 
     @router.get("/blast-radius")
-    async def get_blast_radius():
+    async def get_blast_radius() -> dict[str, Any]:
         if gate._blast_radius is None:
             return {
                 "enabled": False,
@@ -2049,19 +2129,19 @@ def create_api_router(gate: Gate) -> APIRouter:
                 "session_budget_violations": {},
                 "agent_budget_violations": {},
             }
-        status = gate._blast_radius.get_status()
+        status: dict[str, Any] = gate._blast_radius.get_status()
         status["enabled"] = True
         return status
 
     @router.post("/blast-radius/unpause-session/{session_id}")
-    async def unpause_session(session_id: str):
+    async def unpause_session(session_id: str) -> dict[str, Any]:
         if gate._blast_radius is None:
             raise HTTPException(status_code=400, detail="Blast radius not enabled")
         result = gate._blast_radius.unpause_session(session_id)
         return {"unpaused": result, "session_id": session_id}
 
     @router.post("/blast-radius/unpause-agent/{agent_id:path}")
-    async def unpause_agent(agent_id: str):
+    async def unpause_agent(agent_id: str) -> dict[str, Any]:
         if gate._blast_radius is None:
             raise HTTPException(status_code=400, detail="Blast radius not enabled")
         result = gate._blast_radius.unpause_agent(agent_id)
@@ -2070,7 +2150,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     @router.get("/blast-radius/events")
     async def get_blast_radius_events(
         limit: int = Query(default=100, le=500),
-    ):
+    ) -> dict[str, Any]:
         events = gate.store.get_session_events("", event_type="blast_radius", limit=limit)
         return {
             "events": [
@@ -2089,12 +2169,12 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Circuit breaker endpoints ---
 
     @router.get("/circuit-breaker")
-    async def get_circuit_breaker():
+    async def get_circuit_breaker() -> dict[str, Any]:
         """Get circuit breaker status for all providers."""
         return gate.circuit_breaker_status()
 
     @router.post("/circuit-breaker/{provider}/reset")
-    async def reset_circuit_breaker(provider: str):
+    async def reset_circuit_breaker(provider: str) -> dict[str, str]:
         """Reset a provider's circuit breaker to closed."""
         result = gate.reset_circuit_breaker(provider)
         if not result:
@@ -2108,7 +2188,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Compliance endpoints ---
 
     @router.get("/compliance/profiles")
-    async def list_compliance_profiles():
+    async def list_compliance_profiles() -> dict[str, Any]:
         """List available compliance profile presets."""
         from stateloom.compliance.profiles import PROFILE_PRESETS
 
@@ -2136,7 +2216,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"profiles": profiles, "active_global": active}
 
     @router.get("/compliance/global")
-    async def get_global_compliance():
+    async def get_global_compliance() -> dict[str, Any]:
         """Get the global compliance profile."""
         cp = gate.config.compliance_profile
         if not cp or cp.standard == "none":
@@ -2144,7 +2224,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"compliance_profile": cp.model_dump()}
 
     @router.put("/compliance/global")
-    async def set_global_compliance(request: SetComplianceProfileRequest):
+    async def set_global_compliance(request: SetComplianceProfileRequest) -> dict[str, Any]:
         """Set the global compliance profile (applies to all sessions without org/team profile)."""
         from stateloom.compliance.profiles import resolve_profile
 
@@ -2175,7 +2255,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"compliance_profile": profile.model_dump()}
 
     @router.delete("/compliance/global")
-    async def clear_global_compliance():
+    async def clear_global_compliance() -> dict[str, str]:
         """Clear the global compliance profile."""
         old_profile = gate.config.compliance_profile
         gate.config.compliance_profile = None
@@ -2196,7 +2276,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         org_id: str | None = Query(default=None),
         standard: str | None = Query(default=None),
         limit: int = Query(default=100, ge=1, le=1000),
-    ):
+    ) -> dict[str, Any]:
         """Query compliance audit events."""
         events = gate.store.get_session_events("", event_type="compliance_audit", limit=limit)
         results = []
@@ -2210,15 +2290,15 @@ def create_api_router(gate: Gate) -> APIRouter:
             if hasattr(e, "compliance_standard"):
                 event_dict.update(
                     {
-                        "compliance_standard": e.compliance_standard,
-                        "action": e.action,
-                        "legal_rule": e.legal_rule,
-                        "justification": e.justification,
-                        "target_type": e.target_type,
-                        "target_id": e.target_id,
-                        "org_id": e.org_id,
-                        "team_id": e.team_id,
-                        "integrity_hash": e.integrity_hash,
+                        "compliance_standard": getattr(e, "compliance_standard", ""),
+                        "action": getattr(e, "action", ""),
+                        "legal_rule": getattr(e, "legal_rule", ""),
+                        "justification": getattr(e, "justification", ""),
+                        "target_type": getattr(e, "target_type", ""),
+                        "target_id": getattr(e, "target_id", ""),
+                        "org_id": getattr(e, "org_id", ""),
+                        "team_id": getattr(e, "team_id", ""),
+                        "integrity_hash": getattr(e, "integrity_hash", ""),
                     }
                 )
             # Filter by org_id or standard if provided
@@ -2230,7 +2310,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"events": results, "count": len(results)}
 
     @router.post("/compliance/purge")
-    async def purge_user_data(request: PurgeRequest):
+    async def purge_user_data(request: PurgeRequest) -> dict[str, Any]:
         """Right to Be Forgotten — purge all data for a user."""
         from stateloom.compliance.purge import PurgeEngine
 
@@ -2248,7 +2328,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/organizations/{org_id}/compliance")
-    async def get_org_compliance(org_id: str):
+    async def get_org_compliance(org_id: str) -> dict[str, Any]:
         """Get an organization's compliance profile."""
         org = gate.get_organization(org_id)
         if not org:
@@ -2259,7 +2339,10 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"compliance_profile": profile.model_dump()}
 
     @router.put("/organizations/{org_id}/compliance")
-    async def set_org_compliance(org_id: str, request: SetComplianceProfileRequest):
+    async def set_org_compliance(
+        org_id: str,
+        request: SetComplianceProfileRequest,
+    ) -> dict[str, Any]:
         """Set an organization's compliance profile."""
         org = gate.get_organization(org_id)
         if not org:
@@ -2291,7 +2374,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"compliance_profile": profile.model_dump()}
 
     @router.get("/teams/{team_id}/compliance")
-    async def get_team_compliance(team_id: str):
+    async def get_team_compliance(team_id: str) -> dict[str, Any]:
         """Get a team's compliance profile."""
         team = gate.get_team(team_id)
         if not team:
@@ -2302,7 +2385,10 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"compliance_profile": profile.model_dump()}
 
     @router.put("/teams/{team_id}/compliance")
-    async def set_team_compliance(team_id: str, request: SetComplianceProfileRequest):
+    async def set_team_compliance(
+        team_id: str,
+        request: SetComplianceProfileRequest,
+    ) -> dict[str, Any]:
         """Set a team's compliance profile."""
         team = gate.get_team(team_id)
         if not team:
@@ -2335,7 +2421,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Rate limiter endpoints ---
 
     @router.put("/teams/{team_id}/rate-limit")
-    async def set_team_rate_limit(team_id: str, body: UpdateTeamRateLimitRequest):
+    async def set_team_rate_limit(team_id: str, body: UpdateTeamRateLimitRequest) -> dict[str, Any]:
         """Set rate limit config for a team."""
         team = gate.get_team(team_id)
         if not team:
@@ -2352,7 +2438,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return _team_to_dict(team)
 
     @router.get("/teams/{team_id}/rate-limit")
-    async def get_team_rate_limit(team_id: str):
+    async def get_team_rate_limit(team_id: str) -> dict[str, Any]:
         """Get rate limit config and live status for a team."""
         team = gate.get_team(team_id)
         if not team:
@@ -2372,7 +2458,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return result
 
     @router.delete("/teams/{team_id}/rate-limit")
-    async def delete_team_rate_limit(team_id: str):
+    async def delete_team_rate_limit(team_id: str) -> dict[str, Any]:
         """Remove rate limit for a team (unlimited)."""
         team = gate.get_team(team_id)
         if not team:
@@ -2388,16 +2474,16 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"status": "removed", "team_id": team_id}
 
     @router.get("/rate-limiter")
-    async def get_rate_limiter_status():
+    async def get_rate_limiter_status() -> dict[str, Any]:
         """Global rate limiter status across all teams."""
         if not hasattr(gate, "_rate_limiter") or gate._rate_limiter is None:
             return {"teams": {}}
-        return gate._rate_limiter.get_status()
+        return cast(dict[str, Any], gate._rate_limiter.get_status())
 
     # --- Async Job endpoints ---
 
     @router.post("/jobs", status_code=202)
-    async def submit_job(body: SubmitJobRequest):
+    async def submit_job(body: SubmitJobRequest) -> dict[str, Any]:
         """Submit an async job for background processing."""
         if not gate.config.async_jobs_enabled:
             raise HTTPException(status_code=400, detail="Async jobs are not enabled")
@@ -2423,7 +2509,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         session_id: str | None = Query(default=None),
         limit: int = Query(default=50, le=500),
         offset: int = Query(default=0, ge=0),
-    ):
+    ) -> dict[str, Any]:
         """List jobs with optional filters."""
         jobs = gate.list_jobs(status=status, session_id=session_id, limit=limit, offset=offset)
         return {
@@ -2432,12 +2518,12 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/jobs/stats")
-    async def get_job_stats():
+    async def get_job_stats() -> dict[str, Any]:
         """Get aggregate job statistics."""
         return gate.job_stats()
 
     @router.get("/jobs/{job_id}")
-    async def get_job(job_id: str):
+    async def get_job(job_id: str) -> dict[str, Any]:
         """Get a job by ID."""
         job = gate.get_job(job_id)
         if job is None:
@@ -2445,7 +2531,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return _job_to_dict(job)
 
     @router.delete("/jobs/{job_id}")
-    async def cancel_job(job_id: str):
+    async def cancel_job(job_id: str) -> dict[str, str]:
         """Cancel a pending job."""
         result = gate.cancel_job(job_id)
         if not result:
@@ -2460,7 +2546,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Virtual key endpoints (proxy) ---
 
     @router.post("/virtual-keys")
-    async def create_virtual_key(body: CreateVirtualKeyRequest):
+    async def create_virtual_key(body: CreateVirtualKeyRequest) -> dict[str, Any]:
         """Create a virtual API key. Returns the full key once (never again)."""
         try:
             from stateloom.ee.setup import _check_dev_scale_cap
@@ -2510,7 +2596,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     @router.get("/virtual-keys")
     async def list_virtual_keys(
         team_id: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         """List virtual keys (previews only, never the full key)."""
         keys = gate.store.list_virtual_keys(team_id=team_id)
         return {
@@ -2533,7 +2619,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.delete("/virtual-keys/{key_id}")
-    async def revoke_virtual_key(key_id: str):
+    async def revoke_virtual_key(key_id: str) -> dict[str, str]:
         """Revoke a virtual key."""
         result = gate.store.revoke_virtual_key(key_id)
         if not result:
@@ -2543,7 +2629,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Virtual key rate limit CRUD ---
 
     @router.put("/virtual-keys/{key_id}/rate-limit")
-    async def set_vk_rate_limit(key_id: str, body: UpdateVKRateLimitRequest):
+    async def set_vk_rate_limit(key_id: str, body: UpdateVKRateLimitRequest) -> dict[str, Any]:
         """Set rate limit config for a virtual key."""
         vk = gate.store.get_virtual_key(key_id)
         if vk is None:
@@ -2563,7 +2649,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.get("/virtual-keys/{key_id}/rate-limit")
-    async def get_vk_rate_limit(key_id: str):
+    async def get_vk_rate_limit(key_id: str) -> dict[str, Any]:
         """Get rate limit config for a virtual key."""
         vk = gate.store.get_virtual_key(key_id)
         if vk is None:
@@ -2576,7 +2662,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.delete("/virtual-keys/{key_id}/rate-limit")
-    async def delete_vk_rate_limit(key_id: str):
+    async def delete_vk_rate_limit(key_id: str) -> dict[str, str]:
         """Remove rate limit for a virtual key (unlimited)."""
         vk = gate.store.get_virtual_key(key_id)
         if vk is None:
@@ -2590,7 +2676,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Agent endpoints ---
 
     @router.post("/agents")
-    async def create_agent(body: CreateAgentRequest):
+    async def create_agent(body: CreateAgentRequest) -> dict[str, Any]:
         """Create an agent with an initial version (v1)."""
         try:
             agent = gate.create_agent(
@@ -2623,7 +2709,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         status: str | None = Query(default=None),
         limit: int = Query(default=50, le=500),
         offset: int = Query(default=0, ge=0),
-    ):
+    ) -> dict[str, Any]:
         """List agents with optional filters."""
         agents = gate.store.list_agents(
             team_id=team_id,
@@ -2641,7 +2727,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     async def get_agent(
         agent_ref: str,
         team_id: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         """Get agent detail with active version."""
         agent = _resolve_agent_ref(gate, agent_ref, team_id)
         if agent is None:
@@ -2658,7 +2744,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         agent_ref: str,
         body: UpdateAgentRequest,
         team_id: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         """Update agent fields."""
         agent = _resolve_agent_ref(gate, agent_ref, team_id)
         if agent is None:
@@ -2676,7 +2762,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     async def delete_agent(
         agent_ref: str,
         team_id: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         """Archive an agent (soft delete)."""
         agent = _resolve_agent_ref(gate, agent_ref, team_id)
         if agent is None:
@@ -2689,7 +2775,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         agent_ref: str,
         body: CreateAgentVersionRequest,
         team_id: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         """Create a new version for an agent."""
         agent = _resolve_agent_ref(gate, agent_ref, team_id)
         if agent is None:
@@ -2710,7 +2796,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         agent_ref: str,
         team_id: str | None = Query(default=None),
         limit: int = Query(default=50, le=500),
-    ):
+    ) -> dict[str, Any]:
         """List versions for an agent (newest first)."""
         agent = _resolve_agent_ref(gate, agent_ref, team_id)
         if agent is None:
@@ -2726,7 +2812,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         agent_ref: str,
         version_id: str,
         team_id: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         """Activate a specific version (rollback)."""
         agent = _resolve_agent_ref(gate, agent_ref, team_id)
         if agent is None:
@@ -2743,7 +2829,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         team_id: str | None = Query(default=None),
         limit: int = Query(default=50, le=500),
         offset: int = Query(default=0, ge=0),
-    ):
+    ) -> dict[str, Any]:
         """List sessions associated with this agent."""
         agent = _resolve_agent_ref(gate, agent_ref, team_id)
         if agent is None:
@@ -2763,7 +2849,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # ── Server restart ──────────────────────────────────────────────────
 
     @router.post("/restart")
-    async def restart_server():
+    async def restart_server() -> dict[str, Any]:
         """Restart the StateLoom server process.
 
         Sends SIGUSR1 to self, which triggers a graceful re-exec in the CLI.
@@ -2781,22 +2867,22 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Prompt Watcher ---
 
     @router.get("/prompts/status")
-    async def get_prompts_status():
+    async def get_prompts_status() -> dict[str, Any]:
         """Get prompt watcher status."""
         if gate._prompt_watcher is None:
             return {"enabled": False}
-        return gate._prompt_watcher.get_status()
+        return cast(dict[str, Any], gate._prompt_watcher.get_status())
 
     @router.post("/prompts/rescan")
-    async def rescan_prompts():
+    async def rescan_prompts() -> dict[str, Any]:
         """Force an immediate full scan of the prompts directory."""
         if gate._prompt_watcher is None:
             raise HTTPException(status_code=404, detail="Prompt watcher not enabled")
         gate._prompt_watcher.scan()
-        return gate._prompt_watcher.get_status()
+        return cast(dict[str, Any], gate._prompt_watcher.get_status())
 
     @router.get("/license")
-    async def license_status():
+    async def license_status() -> dict[str, Any]:
         """Get enterprise license status with feature availability."""
         from stateloom.ee import is_dev_mode, is_licensed, license_info
 
@@ -2814,7 +2900,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Debug mode endpoints ---
 
     @router.get("/debug")
-    async def debug_status():
+    async def debug_status() -> dict[str, Any]:
         """Check if debug mode is enabled."""
         return {"debug": getattr(gate.config, "debug", False)}
 
@@ -2822,7 +2908,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     async def get_server_logs(
         limit: int = Query(default=200, ge=1, le=2000),
         level: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         """Get recent server logs (debug mode only)."""
         if not getattr(gate.config, "debug", False):
             raise HTTPException(status_code=404, detail="Debug mode is not enabled")
@@ -2834,7 +2920,7 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"logs": buf.get_logs(limit=limit, level=level), "debug": True}
 
     @router.delete("/logs")
-    async def clear_server_logs():
+    async def clear_server_logs() -> dict[str, bool]:
         """Clear the server log buffer (debug mode only)."""
         if not getattr(gate.config, "debug", False):
             raise HTTPException(status_code=404, detail="Debug mode is not enabled")
@@ -2848,12 +2934,12 @@ def create_api_router(gate: Gate) -> APIRouter:
     # --- Security endpoints ---
 
     @router.get("/security")
-    async def get_security_status():
+    async def get_security_status() -> dict[str, Any]:
         """Get full security engine status (audit hooks + vault)."""
         return gate.security_status()
 
     @router.post("/security/audit-hooks/configure")
-    async def configure_audit_hooks(request: Request):
+    async def configure_audit_hooks(request: Request) -> dict[str, Any]:
         """Update audit hook configuration at runtime."""
         body = await request.json()
         enabled = body.get("enabled")
@@ -2891,14 +2977,14 @@ def create_api_router(gate: Gate) -> APIRouter:
         return gate.security_status()
 
     @router.get("/security/vault")
-    async def get_vault_status():
+    async def get_vault_status() -> dict[str, Any]:
         """Get vault status (key names, NOT values)."""
         if gate._secret_vault is None:
             return {"enabled": False}
-        return gate._secret_vault.get_status()
+        return cast(dict[str, Any], gate._secret_vault.get_status())
 
     @router.post("/security/vault/store")
-    async def store_vault_secret(request: Request):
+    async def store_vault_secret(request: Request) -> dict[str, Any]:
         """Store a new secret in the vault."""
         body = await request.json()
         name = body.get("name", "")
@@ -2918,7 +3004,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     @router.get("/security/events")
     async def get_security_events(
         limit: int = Query(default=50, ge=1, le=500),
-    ):
+    ) -> dict[str, Any]:
         """Get recent security audit events."""
         if gate._audit_hook_manager is None:
             return {"events": []}
@@ -2927,25 +3013,15 @@ def create_api_router(gate: Gate) -> APIRouter:
         return {"events": events[-limit:]}
 
     @router.get("/security/guardrails")
-    async def get_guardrails_status():
+    async def get_guardrails_status() -> dict[str, Any]:
         """Get guardrails config status and aggregated detection stats."""
         from stateloom.core.event import GuardrailEvent
 
+        gr_cfg = _read_guardrails_config(gate)
+
         config_status = {
-            "enabled": gate.config.guardrails.enabled,
-            "mode": gate.config.guardrails.mode.value
-            if gate.config.guardrails.enabled
-            else "audit",
-            "heuristic_enabled": gate.config.guardrails.heuristic_enabled,
-            "nli_enabled": gate.config.guardrails.nli_enabled,
-            "nli_available": (
-                gate._guardrails._nli_classifier.is_available
-                if gate._guardrails and gate._guardrails._nli_classifier
-                else False
-            ),
-            "local_model_enabled": gate.config.guardrails.local_model_enabled,
-            "local_model": gate.config.guardrails.local_model,
-            "output_scanning_enabled": gate.config.guardrails.output_scanning_enabled,
+            **gr_cfg,
+            "nli_available": _check_nli_available(),
             "pattern_count": (len(gate._guardrails._heuristic_patterns) if gate._guardrails else 0),
         }
 
@@ -2975,14 +3051,20 @@ def create_api_router(gate: Gate) -> APIRouter:
         }
 
     @router.post("/security/guardrails/configure")
-    async def configure_guardrails(request: Request):
+    async def configure_guardrails(request: Request) -> dict[str, Any]:
         """Update guardrails configuration at runtime."""
         body = await request.json()
+
+        enabled = body.get("enabled")
         nli_enabled = body.get("nli_enabled")
         nli_threshold = body.get("nli_threshold")
         heuristic_enabled = body.get("heuristic_enabled")
         mode = body.get("mode")
+        local_model_enabled = body.get("local_model_enabled")
+        output_scanning_enabled = body.get("output_scanning_enabled")
 
+        if enabled is not None:
+            gate.config.guardrails_enabled = bool(enabled)
         if nli_enabled is not None:
             gate.config.guardrails_nli_enabled = bool(nli_enabled)
         if nli_threshold is not None:
@@ -2993,6 +3075,10 @@ def create_api_router(gate: Gate) -> APIRouter:
             from stateloom.core.types import GuardrailMode
 
             gate.config.guardrails_mode = GuardrailMode(mode)
+        if local_model_enabled is not None:
+            gate.config.guardrails_local_model_enabled = bool(local_model_enabled)
+        if output_scanning_enabled is not None:
+            gate.config.guardrails_output_scanning_enabled = bool(output_scanning_enabled)
 
         _persist_guardrails_state(gate)
 
@@ -3002,7 +3088,7 @@ def create_api_router(gate: Gate) -> APIRouter:
     @router.get("/security/guardrails/events")
     async def get_guardrail_events(
         limit: int = Query(default=50, ge=1, le=500),
-    ):
+    ) -> dict[str, Any]:
         """Get recent guardrail events with all fields."""
         from stateloom.core.event import GuardrailEvent
 
@@ -3032,30 +3118,32 @@ def create_api_router(gate: Gate) -> APIRouter:
     async def list_consensus_runs(
         limit: int = Query(default=50, le=500),
         strategy: str | None = Query(default=None),
-    ):
+    ) -> dict[str, Any]:
         events = gate.store.get_session_events("", event_type="consensus", limit=limit)
         runs = []
         for e in events:
             if strategy and getattr(e, "strategy", "") != strategy:
                 continue
-            runs.append({
-                "session_id": e.session_id,
-                "strategy": getattr(e, "strategy", ""),
-                "models": getattr(e, "models", []),
-                "total_rounds": getattr(e, "total_rounds", 0),
-                "confidence": round(getattr(e, "confidence", 0.0), 4),
-                "total_cost": round(getattr(e, "total_cost", 0.0), 6),
-                "total_duration_ms": round(getattr(e, "total_duration_ms", 0.0), 1),
-                "early_stopped": getattr(e, "early_stopped", False),
-                "aggregation_method": getattr(e, "aggregation_method", ""),
-                "winner_model": getattr(e, "winner_model", ""),
-                "final_answer_preview": getattr(e, "final_answer_preview", ""),
-                "timestamp": e.timestamp.isoformat(),
-            })
+            runs.append(
+                {
+                    "session_id": e.session_id,
+                    "strategy": getattr(e, "strategy", ""),
+                    "models": getattr(e, "models", []),
+                    "total_rounds": getattr(e, "total_rounds", 0),
+                    "confidence": round(getattr(e, "confidence", 0.0), 4),
+                    "total_cost": round(getattr(e, "total_cost", 0.0), 6),
+                    "total_duration_ms": round(getattr(e, "total_duration_ms", 0.0), 1),
+                    "early_stopped": getattr(e, "early_stopped", False),
+                    "aggregation_method": getattr(e, "aggregation_method", ""),
+                    "winner_model": getattr(e, "winner_model", ""),
+                    "final_answer_preview": getattr(e, "final_answer_preview", ""),
+                    "timestamp": e.timestamp.isoformat(),
+                }
+            )
         return {"runs": runs, "total": len(runs)}
 
     @router.get("/consensus-runs/{session_id}")
-    async def get_consensus_run(session_id: str):
+    async def get_consensus_run(session_id: str) -> dict[str, Any]:
         session = gate.store.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -3065,9 +3153,7 @@ def create_api_router(gate: Gate) -> APIRouter:
             session_id, event_type="consensus", limit=1
         )
         if not consensus_events:
-            raise HTTPException(
-                status_code=404, detail="No consensus data for this session"
-            )
+            raise HTTPException(status_code=404, detail="No consensus data for this session")
         ce = consensus_events[0]
 
         # Get debate round events
@@ -3076,17 +3162,19 @@ def create_api_router(gate: Gate) -> APIRouter:
         )
         rounds = []
         for re in round_events:
-            rounds.append({
-                "round_number": getattr(re, "round_number", 0),
-                "strategy": getattr(re, "strategy", ""),
-                "models": getattr(re, "models", []),
-                "responses_summary": getattr(re, "responses_summary", []),
-                "agreement_score": round(getattr(re, "agreement_score", 0.0), 4),
-                "consensus_reached": getattr(re, "consensus_reached", False),
-                "round_cost": round(getattr(re, "round_cost", 0.0), 6),
-                "round_duration_ms": round(getattr(re, "round_duration_ms", 0.0), 1),
-                "timestamp": re.timestamp.isoformat(),
-            })
+            rounds.append(
+                {
+                    "round_number": getattr(re, "round_number", 0),
+                    "strategy": getattr(re, "strategy", ""),
+                    "models": getattr(re, "models", []),
+                    "responses_summary": getattr(re, "responses_summary", []),
+                    "agreement_score": round(getattr(re, "agreement_score", 0.0), 4),
+                    "consensus_reached": getattr(re, "consensus_reached", False),
+                    "round_cost": round(getattr(re, "round_cost", 0.0), 6),
+                    "round_duration_ms": round(getattr(re, "round_duration_ms", 0.0), 1),
+                    "timestamp": re.timestamp.isoformat(),
+                }
+            )
 
         # Get child sessions (debater sessions)
         children = gate.store.list_child_sessions(session_id, limit=100)
@@ -3120,13 +3208,29 @@ def _persist_kill_switch_state(gate: Any) -> None:
     try:
         gate.store.save_secret("kill_switch_active", "1" if gate.config.kill_switch_active else "0")
         gate.store.save_secret("kill_switch_message", gate.config.kill_switch_message)
-        gate.store.save_secret(
-            "kill_switch_response_mode", gate.config.kill_switch_response_mode
-        )
+        gate.store.save_secret("kill_switch_response_mode", gate.config.kill_switch_response_mode)
         rules = [r.model_dump() for r in gate.config.kill_switch_rules]
         gate.store.save_secret("kill_switch_rules_json", json.dumps(rules))
     except Exception:
         logger.debug("Failed to persist kill switch state to store", exc_info=True)
+
+
+def _persist_local_routing_state(gate: Any) -> None:
+    """Persist local routing config to the store so it survives re-init."""
+    import json
+
+    try:
+        blob = json.dumps(
+            {
+                "auto_route_force_local": gate.config.auto_route_force_local,
+                "auto_route_enabled": gate.config.auto_route_enabled,
+                "local_model_default": gate.config.local_model_default,
+                "local_model_enabled": gate.config.local_model_enabled,
+            }
+        )
+        gate.store.save_secret("local_routing_config_json", blob)
+    except Exception:
+        logger.debug("Failed to persist local routing state to store", exc_info=True)
 
 
 def _persist_pii_state(gate: Any) -> None:
@@ -3134,11 +3238,13 @@ def _persist_pii_state(gate: Any) -> None:
     import json
 
     try:
-        blob = json.dumps({
-            "enabled": gate.config.pii_enabled,
-            "default_mode": gate.config.pii_default_mode.value,
-            "rules": [r.model_dump() for r in gate.config.pii_rules],
-        })
+        blob = json.dumps(
+            {
+                "enabled": gate.config.pii_enabled,
+                "default_mode": gate.config.pii_default_mode.value,
+                "rules": [r.model_dump() for r in gate.config.pii_rules],
+            }
+        )
         gate.store.save_secret("pii_config_json", blob)
     except Exception:
         logger.debug("Failed to persist PII state to store", exc_info=True)
@@ -3149,11 +3255,13 @@ def _persist_budget_state(gate: Any) -> None:
     import json
 
     try:
-        blob = json.dumps({
-            "budget_per_session": gate.config.budget_per_session,
-            "budget_global": gate.config.budget_global,
-            "budget_action": gate.config.budget_action.value,
-        })
+        blob = json.dumps(
+            {
+                "budget_per_session": gate.config.budget_per_session,
+                "budget_global": gate.config.budget_global,
+                "budget_action": gate.config.budget_action.value,
+            }
+        )
         gate.store.save_secret("budget_config_json", blob)
     except Exception:
         logger.debug("Failed to persist budget state to store", exc_info=True)
@@ -3164,14 +3272,71 @@ def _persist_blast_radius_state(gate: Any) -> None:
     import json
 
     try:
-        blob = json.dumps({
-            "enabled": gate.config.blast_radius_enabled,
-            "consecutive_failures": gate.config.blast_radius_consecutive_failures,
-            "budget_violations_per_hour": gate.config.blast_radius_budget_violations_per_hour,
-        })
+        blob = json.dumps(
+            {
+                "enabled": gate.config.blast_radius_enabled,
+                "consecutive_failures": gate.config.blast_radius_consecutive_failures,
+                "budget_violations_per_hour": gate.config.blast_radius_budget_violations_per_hour,
+            }
+        )
         gate.store.save_secret("blast_radius_config_json", blob)
     except Exception:
         logger.debug("Failed to persist blast radius state to store", exc_info=True)
+
+
+def _check_nli_available() -> bool:
+    """Check if the NLI classifier backend (sentence-transformers) is installed."""
+    try:
+        from stateloom.guardrails.nli_classifier import _ST_AVAILABLE
+
+        return _ST_AVAILABLE
+    except Exception:
+        return False
+
+
+def _read_guardrails_config(gate: Any) -> dict[str, Any]:
+    """Read guardrails config, merging store (source of truth) with gate defaults.
+
+    The store holds values persisted by the dashboard POST endpoint.
+    Gate config provides defaults for any fields not yet persisted.
+    This is a pure read — gate.config is NOT mutated.
+    """
+    import json
+
+    cfg = gate.config
+    result: dict[str, Any] = {
+        "enabled": cfg.guardrails_enabled,
+        "mode": cfg.guardrails_mode.value if cfg.guardrails_enabled else "audit",
+        "heuristic_enabled": cfg.guardrails_heuristic_enabled,
+        "nli_enabled": cfg.guardrails_nli_enabled,
+        "nli_threshold": cfg.guardrails_nli_threshold,
+        "local_model_enabled": cfg.guardrails_local_model_enabled,
+        "local_model": cfg.guardrails_local_model,
+        "output_scanning_enabled": cfg.guardrails_output_scanning_enabled,
+    }
+
+    try:
+        blob = gate.store.get_secret("guardrails_config_json")
+        if blob:
+            data = json.loads(blob)
+            if "enabled" in data:
+                result["enabled"] = bool(data["enabled"])
+            if "mode" in data:
+                result["mode"] = data["mode"]
+            if "nli_enabled" in data:
+                result["nli_enabled"] = bool(data["nli_enabled"])
+            if "heuristic_enabled" in data:
+                result["heuristic_enabled"] = bool(data["heuristic_enabled"])
+            if "nli_threshold" in data:
+                result["nli_threshold"] = float(data["nli_threshold"])
+            if "local_model_enabled" in data:
+                result["local_model_enabled"] = bool(data["local_model_enabled"])
+            if "output_scanning_enabled" in data:
+                result["output_scanning_enabled"] = bool(data["output_scanning_enabled"])
+    except Exception:
+        logger.warning("Failed to read guardrails config from store", exc_info=True)
+
+    return result
 
 
 def _persist_guardrails_state(gate: Any) -> None:
@@ -3179,19 +3344,21 @@ def _persist_guardrails_state(gate: Any) -> None:
     import json
 
     try:
-        blob = json.dumps({
-            "enabled": gate.config.guardrails_enabled,
-            "mode": gate.config.guardrails_mode.value,
-            "heuristic_enabled": gate.config.guardrails_heuristic_enabled,
-            "nli_enabled": gate.config.guardrails_nli_enabled,
-            "nli_threshold": gate.config.guardrails_nli_threshold,
-            "local_model_enabled": gate.config.guardrails_local_model_enabled,
-            "output_scanning_enabled": gate.config.guardrails_output_scanning_enabled,
-            "disabled_rules": gate.config.guardrails_disabled_rules,
-        })
+        blob = json.dumps(
+            {
+                "enabled": gate.config.guardrails_enabled,
+                "mode": gate.config.guardrails_mode.value,
+                "heuristic_enabled": gate.config.guardrails_heuristic_enabled,
+                "nli_enabled": gate.config.guardrails_nli_enabled,
+                "nli_threshold": gate.config.guardrails_nli_threshold,
+                "local_model_enabled": gate.config.guardrails_local_model_enabled,
+                "output_scanning_enabled": gate.config.guardrails_output_scanning_enabled,
+                "disabled_rules": gate.config.guardrails_disabled_rules,
+            }
+        )
         gate.store.save_secret("guardrails_config_json", blob)
     except Exception:
-        logger.debug("Failed to persist guardrails state to store", exc_info=True)
+        logger.warning("Failed to persist guardrails state to store", exc_info=True)
 
 
 def _apply_compliance_pii_rules(gate: Any, profile: Any) -> None:
@@ -3231,7 +3398,7 @@ def _reload_pii_scanner(gate: Any) -> None:
             break
 
 
-def _org_to_dict(org: Any) -> dict:
+def _org_to_dict(org: Any) -> dict[str, Any]:
     """Convert an organization to a dict."""
     result = {
         "id": org.id,
@@ -3249,7 +3416,7 @@ def _org_to_dict(org: Any) -> dict:
     return result
 
 
-def _team_to_dict(team: Any) -> dict:
+def _team_to_dict(team: Any) -> dict[str, Any]:
     """Convert a team to a dict."""
     result = {
         "id": team.id,
@@ -3271,7 +3438,7 @@ def _team_to_dict(team: Any) -> dict:
     return result
 
 
-def _session_to_dict(gate: Any, s: Any) -> dict:
+def _session_to_dict(gate: Any, s: Any) -> dict[str, Any]:
     """Convert a session to a dict, including experiment info from metadata."""
     result = {
         "id": s.id,
@@ -3303,7 +3470,7 @@ def _session_to_dict(gate: Any, s: Any) -> dict:
     return result
 
 
-def _job_to_dict(job: Any) -> dict:
+def _job_to_dict(job: Any) -> dict[str, Any]:
     """Convert a Job to a JSON-safe dict."""
     from stateloom.core.job import Job
 
@@ -3357,7 +3524,7 @@ def _resolve_agent_ref(gate: Any, agent_ref: str, team_id: str | None) -> Any:
     return None
 
 
-def _agent_to_dict(agent: Any) -> dict:
+def _agent_to_dict(agent: Any) -> dict[str, Any]:
     """Convert an Agent to a dict."""
     from stateloom.agent.models import Agent
 
@@ -3379,7 +3546,7 @@ def _agent_to_dict(agent: Any) -> dict:
     }
 
 
-def _agent_version_to_dict(version: Any) -> dict:
+def _agent_version_to_dict(version: Any) -> dict[str, Any]:
     """Convert an AgentVersion to a dict."""
     from stateloom.agent.models import AgentVersion
 
@@ -3404,7 +3571,7 @@ def _agent_version_to_dict(version: Any) -> dict:
 _EVENT_BASE_FIELDS = {"id", "session_id", "step", "event_type", "timestamp", "metadata"}
 
 
-def _event_details(event: object) -> dict:
+def _event_details(event: object) -> dict[str, Any]:
     """Extract type-specific details from an event."""
     from stateloom.core.event import Event
 
@@ -3428,17 +3595,17 @@ def _event_details(event: object) -> dict:
         return details
 
     # Fallback for non-Pydantic event objects (shouldn't happen in practice)
-    details: dict = {}
+    fallback: dict[str, Any] = {}
     for attr in dir(event):
         if attr.startswith("_") or attr in _EVENT_BASE_FIELDS:
             continue
         val = getattr(event, attr, None)
         if val is not None and not callable(val):
-            details[attr] = val
-    return details
+            fallback[attr] = val
+    return fallback
 
 
-def _event_to_dict(e: object) -> dict:
+def _event_to_dict(e: object) -> dict[str, Any]:
     """Convert an event to a serializable dict (shared by multiple endpoints)."""
     return {
         "id": e.id,  # type: ignore[attr-defined]
@@ -3452,7 +3619,7 @@ def _event_to_dict(e: object) -> dict:
 
 def _compute_tool_summaries(
     events: list[object],
-) -> tuple[list[object], dict[int, dict]]:
+) -> tuple[list[object], dict[int, dict[str, Any]]]:
     """Separate primary events from tool continuations, computing summaries.
 
     Returns ``(primary_events, tool_summaries)`` where *tool_summaries* maps
@@ -3467,7 +3634,7 @@ def _compute_tool_summaries(
     from stateloom.core.event import LLMCallEvent, ToolCallEvent
 
     primary: list[object] = []
-    tool_summaries: dict[int, dict] = {}
+    tool_summaries: dict[int, dict[str, Any]] = {}
 
     current_parent_step: int | None = None
     current_tools: list[object] = []
@@ -3482,9 +3649,7 @@ def _compute_tool_summaries(
                     + (getattr(t, "completion_tokens", 0) or 0)
                     for t in current_tools
                 ),
-                "total_cost": round(
-                    sum(getattr(t, "cost", 0) or 0 for t in current_tools), 6
-                ),
+                "total_cost": round(sum(getattr(t, "cost", 0) or 0 for t in current_tools), 6),
                 "total_latency_ms": round(
                     sum(getattr(t, "latency_ms", 0) or 0 for t in current_tools), 1
                 ),

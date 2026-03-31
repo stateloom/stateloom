@@ -9,8 +9,8 @@ from stateloom.core.types import BudgetAction, FailureAction, PIIMode
 from stateloom.gate import Gate
 
 
-def test_block_pii_rule_without_failure_action_raises():
-    """PII rule with mode=block but no on_middleware_failure should raise."""
+def test_block_pii_rule_without_failure_action_defaults_to_block():
+    """PII rule with mode=block auto-defaults on_middleware_failure to block."""
     config = StateLoomConfig(
         auto_patch=False,
         dashboard=False,
@@ -21,8 +21,8 @@ def test_block_pii_rule_without_failure_action_raises():
             PIIRule(pattern="credit_card", mode=PIIMode.BLOCK),
         ],
     )
-    with pytest.raises(StateLoomError, match="on_middleware_failure"):
-        Gate(config)
+    gate = Gate(config)
+    assert gate.config.pii_rules[0].on_middleware_failure == FailureAction.BLOCK
 
 
 def test_block_pii_rule_with_failure_action_passes():
@@ -59,8 +59,8 @@ def test_audit_pii_rule_without_failure_action_passes():
     assert len(gate.config.pii_rules) == 1
 
 
-def test_budget_hard_stop_without_failure_action_raises():
-    """Budget with hard_stop and no on_middleware_failure should raise."""
+def test_budget_hard_stop_without_failure_action_defaults_to_block():
+    """Budget with hard_stop auto-defaults on_middleware_failure to block."""
     config = StateLoomConfig(
         auto_patch=False,
         dashboard=False,
@@ -69,8 +69,8 @@ def test_budget_hard_stop_without_failure_action_raises():
         budget_per_session=5.0,
         budget_action=BudgetAction.HARD_STOP,
     )
-    with pytest.raises(StateLoomError, match="on_middleware_failure"):
-        Gate(config)
+    gate = Gate(config)
+    assert gate.config.budget_on_middleware_failure == FailureAction.BLOCK
 
 
 def test_budget_hard_stop_with_failure_action_passes():
@@ -114,8 +114,8 @@ def test_no_budget_no_failure_action_passes():
     assert gate.config.budget_per_session is None
 
 
-def test_multiple_validation_errors():
-    """Multiple validation errors are reported together."""
+def test_multiple_block_rules_auto_default():
+    """Multiple block-mode PII rules all get on_middleware_failure auto-defaulted."""
     config = StateLoomConfig(
         auto_patch=False,
         dashboard=False,
@@ -126,8 +126,7 @@ def test_multiple_validation_errors():
             PIIRule(pattern="credit_card", mode=PIIMode.BLOCK),
             PIIRule(pattern="ssn", mode=PIIMode.BLOCK),
         ],
-        budget_per_session=5.0,
-        budget_action=BudgetAction.HARD_STOP,
     )
-    with pytest.raises(StateLoomError, match="credit_card"):
-        Gate(config)
+    gate = Gate(config)
+    assert gate.config.pii_rules[0].on_middleware_failure == FailureAction.BLOCK
+    assert gate.config.pii_rules[1].on_middleware_failure == FailureAction.BLOCK

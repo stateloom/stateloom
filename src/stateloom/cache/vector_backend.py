@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 logger = logging.getLogger("stateloom.cache.vector_backend")
 
 # Guard optional dependencies
 try:
-    import faiss
+    import faiss  # type: ignore[import-untyped]
     import numpy as np
 
     _FAISS_AVAILABLE = True
@@ -26,7 +26,7 @@ except ImportError:
 class VectorBackend(Protocol):
     """Protocol for vector storage backends."""
 
-    def add(self, entry_id: str, embedding: list[float], metadata: dict) -> None:
+    def add(self, entry_id: str, embedding: list[float], metadata: dict[str, Any]) -> None:
         """Add a vector to the index."""
         ...
 
@@ -47,7 +47,7 @@ class VectorBackend(Protocol):
         """Clear all vectors from the index."""
         ...
 
-    def rebuild(self, entries: list[tuple[str, list[float], dict]]) -> None:
+    def rebuild(self, entries: list[tuple[str, list[float], dict[str, Any]]]) -> None:
         """Bulk rebuild the index from (entry_id, embedding, metadata) tuples."""
         ...
 
@@ -79,7 +79,7 @@ class FaissBackend:
         self._session_ids: list[str] = []
         self._lock = threading.Lock()
 
-    def add(self, entry_id: str, embedding: list[float], metadata: dict) -> None:
+    def add(self, entry_id: str, embedding: list[float], metadata: dict[str, Any]) -> None:
         vec = np.array([embedding], dtype=np.float32)
         with self._lock:
             self._index.add(vec)
@@ -132,7 +132,7 @@ class FaissBackend:
             self._entry_ids.clear()
             self._session_ids.clear()
 
-    def rebuild(self, entries: list[tuple[str, list[float], dict]]) -> None:
+    def rebuild(self, entries: list[tuple[str, list[float], dict[str, Any]]]) -> None:
         if not entries:
             self.reset()
             return
@@ -145,7 +145,7 @@ class FaissBackend:
 
     @property
     def size(self) -> int:
-        return self._index.ntotal
+        return cast(int, self._index.ntotal)
 
     def close(self) -> None:
         pass

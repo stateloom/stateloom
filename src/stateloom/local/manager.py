@@ -12,7 +12,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -277,7 +277,7 @@ class OllamaManager:
                     # e.g. https://github.com/ollama/ollama/releases/tag/v0.9.0
                     tag = location.rsplit("/", 1)[-1]
                     if tag:
-                        return tag
+                        return cast(str, tag)
                 # Fallback: follow redirect and parse URL
                 resp2 = client.get(_GITHUB_LATEST, follow_redirects=True)
                 tag = str(resp2.url).rsplit("/", 1)[-1]
@@ -300,7 +300,6 @@ class OllamaManager:
         """
         import io
         import tarfile
-        import tempfile
 
         with httpx.Client(
             follow_redirects=True,

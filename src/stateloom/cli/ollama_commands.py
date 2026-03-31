@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import click
 
 from stateloom.local.manager import DEFAULT_PORT, OllamaManager
@@ -27,7 +29,7 @@ def install(ver: str) -> None:
 
     click.echo(f"Installing Ollama ({ver})...")
 
-    with click.progressbar(length=100, label="Downloading") as bar:
+    with click.progressbar(length=100, label="Downloading") as bar:  # type: ignore[var-annotated]
         last_pct = [0]
 
         def _progress(downloaded: int, total: int) -> None:
@@ -140,7 +142,7 @@ def pull(model: str, port: int) -> None:
 
     last_status = [""]
 
-    def _progress(data: dict) -> None:
+    def _progress(data: dict[str, Any]) -> None:
         status = data.get("status", "")
         if status != last_status[0]:
             click.echo(f"  {status}")
@@ -193,8 +195,8 @@ def recommend() -> None:
     from stateloom.local.hardware import detect_hardware, recommend_models
 
     hw = detect_hardware()
-    click.echo(f"Hardware: {hw.cpu_brand or hw.arch}")
-    click.echo(f"  RAM: {hw.total_ram_gb:.1f} GB")
+    click.echo(f"Hardware: {hw.arch}")
+    click.echo(f"  RAM: {hw.ram_gb:.1f} GB")
     if hw.gpu_name:
         click.echo(f"  GPU: {hw.gpu_name} ({hw.gpu_vram_gb:.1f} GB VRAM)")
     click.echo()

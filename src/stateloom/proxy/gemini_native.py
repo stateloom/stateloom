@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -24,7 +24,6 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from stateloom.proxy.auth import (
     AuthResult,
     ProxyAuth,
-    _StubKey,
     authenticate_request,
     enforce_vk_policies,
     format_policy_error,
@@ -41,6 +40,7 @@ from stateloom.proxy.stream_helpers import SSE_HEADERS, passthrough_stream_relay
 
 if TYPE_CHECKING:
     from stateloom.gate import Gate
+    from stateloom.proxy.virtual_key import VirtualKey
 
 logger = logging.getLogger("stateloom.proxy.gemini_native")
 
@@ -54,7 +54,7 @@ def create_gemini_router(
     router = APIRouter()
     proxy_auth = ProxyAuth(gate)
     proxy_rate_limiter = ProxyRateLimiter(
-        metrics=gate._metrics_collector,
+        metrics=gate._metrics_collector,  # type: ignore[arg-type]
         enabled=gate.config.rate_limiting_enabled,
     )
 
@@ -109,9 +109,7 @@ def create_gemini_router(
         )
         if policy_error is not None:
             status, _error_code, msg = format_policy_error(policy_error, model, "generate")
-            gemini_status = (
-                "RESOURCE_EXHAUSTED" if status == 429 else "PERMISSION_DENIED"
-            )
+            gemini_status = "RESOURCE_EXHAUSTED" if status == 429 else "PERMISSION_DENIED"
             return JSONResponse(
                 status_code=status,
                 content=_gemini_error(status, msg, gemini_status),
@@ -124,7 +122,9 @@ def create_gemini_router(
 
         logger.info(
             "POST /v1beta/models/%s model=%s vk=%s",
-            model, model, vk.id if hasattr(vk, "id") else "anonymous",
+            model,
+            model,
+            vk.id if hasattr(vk, "id") else "anonymous",
         )
 
         # Convert Gemini contents to OpenAI messages format for middleware
@@ -155,33 +155,35 @@ def create_gemini_router(
                 # Gemini tool results → OpenAI role="tool" messages
                 # (enables _is_tool_continuation detection for dashboard collapsing)
                 if text_parts:
-                    openai_messages.append(
-                        {"role": openai_role, "content": "\n".join(text_parts)}
-                    )
+                    openai_messages.append({"role": openai_role, "content": "\n".join(text_parts)})
                 for fr in function_responses:
                     resp = fr.get("response", {})
-                    openai_messages.append({
-                        "role": "tool",
-                        "content": json.dumps(resp) if isinstance(resp, dict) else str(resp),
-                        "tool_call_id": fr.get("name", "unknown"),
-                    })
+                    openai_messages.append(
+                        {
+                            "role": "tool",
+                            "content": json.dumps(resp) if isinstance(resp, dict) else str(resp),
+                            "tool_call_id": fr.get("name", "unknown"),
+                        }
+                    )
             elif function_calls:
                 # Gemini function calls → OpenAI assistant + tool_calls
-                openai_messages.append({
-                    "role": "assistant",
-                    "content": "\n".join(text_parts) if text_parts else None,
-                    "tool_calls": [
-                        {
-                            "id": fc.get("name", "unknown"),
-                            "type": "function",
-                            "function": {
-                                "name": fc.get("name", "unknown"),
-                                "arguments": json.dumps(fc.get("args", {})),
-                            },
-                        }
-                        for fc in function_calls
-                    ],
-                })
+                openai_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "\n".join(text_parts) if text_parts else None,
+                        "tool_calls": [
+                            {
+                                "id": fc.get("name", "unknown"),
+                                "type": "function",
+                                "function": {
+                                    "name": fc.get("name", "unknown"),
+                                    "arguments": json.dumps(fc.get("args", {})),
+                                },
+                            }
+                            for fc in function_calls
+                        ],
+                    }
+                )
             elif text_parts:
                 openai_messages.append(
                     {
@@ -205,7 +207,7 @@ def create_gemini_router(
         # Resolve provider keys
         provider_keys: dict[str, str] = {}
         if vk.org_id:
-            provider_keys = proxy_auth.get_provider_keys(vk)
+            provider_keys = proxy_auth.get_provider_keys(cast("VirtualKey", vk))
         if byok_key:
             provider_keys["google"] = byok_key
 
@@ -384,20 +386,11 @@ async def _handle_passthrough(
                 session.end_user = end_user
             session.next_step()
 
-            # Detect CLI internal overhead calls (e.g. Gemini CLI quota/
-            # count checks using a lightweight flash model with a single
-            # user message).  All calls in this handler are proxy-originated,
-            # so no session-name guard is needed.
             request_kwargs: dict[str, Any] = {
                 "messages": openai_messages,
                 "model": model,
+                "_proxy": True,
             }
-            if "flash" in model:
-                non_system = [
-                    m for m in openai_messages if m.get("role") != "system"
-                ]
-                if len(non_system) == 1 and non_system[0].get("role") == "user":
-                    request_kwargs["_cli_internal"] = True
 
             ctx = MiddlewareContext(
                 session=session,
@@ -406,9 +399,9 @@ async def _handle_passthrough(
                 model=model,
                 method="generateContent",
                 request_kwargs=request_kwargs,
-                request_hash="" if stream else gate.pipeline._hash_request(
-                    {"messages": openai_messages, "model": model}
-                ),
+                request_hash=""
+                if stream
+                else gate.pipeline._hash_request({"messages": openai_messages, "model": model}),
                 provider_base_url=gate.config.proxy.upstream_gemini,
             )
 
@@ -452,7 +445,7 @@ async def _handle_passthrough(
                             "_status_code": resp.status_code,
                             **error_data,
                         }
-                    return resp.json()
+                    return cast(dict[str, Any], resp.json())
 
                 result = await gate.pipeline.execute(ctx, llm_call)
 
@@ -488,9 +481,9 @@ async def _handle_streaming_passthrough(
 
     def _format_error(exc: Exception) -> bytes:
         _status, content = _map_error(exc)
-        return f"data: {json.dumps(content)}\n\n".encode("utf-8")
+        return f"data: {json.dumps(content)}\n\n".encode()
 
-    return await passthrough_stream_relay(
+    return await passthrough_stream_relay(  # type: ignore[return-value]
         passthrough,
         upstream_url,
         body,
@@ -655,11 +648,11 @@ def _extract_text(raw_response: Any) -> str:
         return ""
     try:
         if hasattr(raw_response, "choices") and raw_response.choices:
-            return raw_response.choices[0].message.content or ""
+            return cast(str, raw_response.choices[0].message.content or "")
         if hasattr(raw_response, "content") and hasattr(raw_response, "stop_reason"):
             blocks = raw_response.content
             if blocks and hasattr(blocks[0], "text"):
-                return blocks[0].text
+                return cast(str, blocks[0].text)
     except Exception:
         pass
     return str(raw_response)

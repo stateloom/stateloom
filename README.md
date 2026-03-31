@@ -3,13 +3,13 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
 
-**The control plane for AI agents.** Track, secure, and optimize every agent run — not just individual LLM calls.
+**The stateful control plane for AI agents.** Track, secure, and optimize every agent run — not just individual LLM calls.
 
 ```python
 import stateloom
 stateloom.init()
 # That's it. Every agent run is tracked as a session.
-# Open localhost:4781 for the live dashboard.
+# Open localhost:4782 for the live dashboard.
 ```
 
 ---
@@ -29,6 +29,7 @@ One line of code. No SDK lock-in. Your existing OpenAI/Anthropic/Gemini code wor
 - [Why StateLoom?](#why-stateloom)
 - [Install](#install)
 - [Quick Start](#quick-start)
+- [Agent CLI Integration](#agent-cli-integration)
 - [Providers](#providers)
 - [For Individual Developers](#for-individual-developers-free--open-source)
 - [For Teams & Enterprise](#for-teams--enterprise)
@@ -58,13 +59,80 @@ import stateloom
 import openai
 
 stateloom.init()
-
 client = openai.OpenAI()
-response = client.chat.completions.create(
-    model="gpt-4o",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-# Terminal: [StateLoom] gpt-4o | 28 tok | $0.0004 | 312ms | session:a1b2c3...
+
+with stateloom.session("customer-report", budget=2.0, durable=True) as s:
+    # Step 1: Research
+    research = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Key trends in AI governance 2025"}],
+    )
+
+    # Step 2: Analyze
+    analysis = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": f"Analyze: {research.choices[0].message.content}"}],
+    )
+
+    # Step 3: Synthesize
+    report = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": f"Write report: {analysis.choices[0].message.content}"}],
+    )
+
+    print(f"Total: ${s.total_cost:.2f} | {s.total_tokens} tokens | {s.call_count} calls")
+
+# If this script crashes on Step 3, restarting it skips Steps 1 & 2
+# instantly — $0 API cost and 0ms latency.
+# Budget enforcement stops the whole run if it exceeds $2 — across all steps, not per-call.
+```
+
+## Agent CLI Integration
+
+You already pay for Claude Pro or Gemini Ultra. Use your existing subscription through StateLoom — get cost tracking, PII scanning, budget enforcement, guardrails, and a session timeline for every agent run. No API key needed, no code changes.
+
+**Start the proxy:**
+
+```bash
+stateloom serve
+```
+
+**Claude CLI:**
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:4782
+claude "explain this codebase"
+# All calls appear as one session in the dashboard
+```
+
+**Gemini CLI:**
+
+```bash
+export CODE_ASSIST_ENDPOINT=http://localhost:4782/code-assist
+gemini "refactor the auth module"
+```
+
+Both CLIs connect to the same StateLoom instance. Subscription users (Claude Max, Gemini Ultra) work transparently — OAuth tokens pass through to the upstream provider.
+
+**What you get:**
+- Every multi-step agent run grouped into a single session with a waterfall trace timeline
+- Per-run cost and token tracking across all tool-use sub-calls
+- PII detection and blocking before prompts reach the LLM
+- Budget caps per agent run (stop runaway tool loops from burning credits)
+- Guardrails (prompt injection detection) on every message
+- Exact-match caching to skip duplicate calls
+- A fully functional dashboard at `localhost:4782` — toggle PII rules, guardrails, kill switch, budgets, and rate limits on the fly without restarting
+
+**Production mode**
+
+```bash
+stateloom serve
+```
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:4782
+export ANTHROPIC_API_KEY=ag-...    # Virtual key instead of raw API key
+claude "summarize the PR"
 ```
 
 ## Providers
@@ -76,9 +144,6 @@ Auto-detects and patches installed LLM clients:
 | OpenAI | `openai` | Yes |
 | Anthropic | `anthropic` | Yes |
 | Google Gemini | `google-generativeai` | Yes |
-| Cohere | `cohere` | Yes |
-| Mistral | `mistralai` | Yes |
-| LiteLLM | `litellm` | Yes |
 | Ollama (local) | — | Via `local_model=` |
 
 ## For Individual Developers (Free & Open Source)
@@ -121,7 +186,7 @@ Everything you need to build, test, and debug agents — out of the box.
 - **Unified chat API** — provider-agnostic `stateloom.chat()` without importing any SDK
 - **Session export/import** — portable JSON bundles for sharing, archiving, and migration
 - **LangChain / LangGraph integration** — callback handlers for popular agent frameworks
-- **Local dashboard & REST API** — live session viewer, security controls, observability charts at `localhost:4781`
+- **Local dashboard & REST API** — live session viewer, security controls, observability charts at `localhost:4782`
 
 ## For Teams & Enterprise
 
@@ -159,14 +224,6 @@ Governance and infrastructure for teams running agents in production.
 - **Distillation flywheel** — auto-generate fine-tuning datasets from production traffic as .jsonl training data
 
 ## Key Examples
-
-### Sessions & Budget
-
-```python
-with stateloom.session("task-123", budget=5.0) as s:
-    response = client.chat.completions.create(...)
-    print(s.total_cost, s.total_tokens)
-```
 
 ### PII Detection
 
@@ -234,12 +291,11 @@ stateloom.init(local_model="llama3.2")
 ```python
 stateloom.init(
     shadow=True,
-    shadow_model="llama3.2:8b",      # Single candidate
-    # shadow_models=["llama3.2:8b", "qwen2.5:7b"],  # Or multiple candidates
-    shadow_sample_rate=0.5,           # Test 50% of traffic
-    shadow_max_context_tokens=8192,   # Skip prompts > 8K tokens
+    shadow_model="claude-haiku-4-5-20251001",  # Cloud-to-cloud candidate
+    # shadow_model="llama3.2:8b",              # Or local model via Ollama
+    shadow_sample_rate=0.5,                     # Test 50% of traffic
 )
-# Dashboard: localhost:4781 → Model Testing → see readiness scores
+# Dashboard: localhost:4782 → Model Testing → see similarity scores
 ```
 
 ### Durable Resumption
@@ -287,71 +343,23 @@ agent = stateloom.create_agent(
 ### Proxy
 
 ```python
-stateloom.init(proxy_enabled=True)
+stateloom.init(proxy=True)
 
 # Any SDK, any language:
-client = openai.OpenAI(base_url="http://localhost:4781/v1", api_key="ag-...")
-```
-
-### Agent CLI Integration
-
-Point Claude CLI or Gemini CLI at StateLoom to get cost tracking, PII scanning, budget enforcement, guardrails, caching, and a full session timeline for every agent run — with zero code changes.
-
-**Start the proxy:**
-
-```bash
-stateloom serve --no-auth          # localhost:4782, no virtual key required
-```
-
-**Claude CLI:**
-
-```bash
-export ANTHROPIC_BASE_URL=http://localhost:4782
-claude "explain this codebase"
-# All calls appear as one session in the dashboard
-```
-
-**Gemini CLI:**
-
-```bash
-export CODE_ASSIST_ENDPOINT=http://localhost:4782/code-assist
-gemini "refactor the auth module"
-```
-
-Both CLIs connect to the same StateLoom instance. Subscription users (Claude Max, Gemini Ultra) work transparently — OAuth tokens pass through to the upstream provider.
-
-**What you get:**
-- Every multi-step agent run grouped into a single session with a waterfall trace timeline
-- Per-run cost and token tracking across all tool-use sub-calls
-- PII detection and blocking before prompts reach the LLM
-- Budget caps per agent run (stop runaway tool loops from burning credits)
-- Guardrails (prompt injection detection) on every message
-- Exact-match caching to skip duplicate calls
-- Dashboard at `localhost:4782` with live session viewer
-
-**Production mode** — require virtual keys for authentication:
-
-```bash
-stateloom serve   # Virtual key required (ag-... token)
-```
-
-```bash
-export ANTHROPIC_BASE_URL=http://localhost:4782
-export ANTHROPIC_API_KEY=ag-...    # Virtual key instead of raw API key
-claude "summarize the PR"
+client = openai.OpenAI(base_url="http://localhost:4782/v1", api_key="ag-...")
 ```
 
 ### Unified Chat API
 
 ```python
 stateloom.init(default_model="gpt-4o")
-response = stateloom.chat("What is the capital of France?")
+response = stateloom.chat(messages=[{"role": "user", "content": "What is the capital of France?"}])
 print(response.content)  # "The capital of France is Paris."
 ```
 
 ## Dashboard
 
-Starts automatically at `localhost:4781`. Live session viewer, REST API, and WebSocket event streaming.
+Starts automatically at `localhost:4782`. Live session viewer, REST API, and WebSocket event streaming.
 
 - **Overview** — total cost, active sessions, cloud/local calls, PII detections, guardrail detections, cache hits
 - **Sessions** — list, detail with waterfall trace timeline, cost/token breakdown, child sessions

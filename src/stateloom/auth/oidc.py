@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 
 try:
@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover
     _HTTPX_AVAILABLE = False
 
 # In-memory discovery cache: issuer_url -> (discovery_dict, fetched_at)
-_DISCOVERY_CACHE: dict[str, tuple[dict, float]] = {}
+_DISCOVERY_CACHE: dict[str, tuple[dict[str, Any], float]] = {}
 _DISCOVERY_TTL = 300  # 5 minutes
 
 
@@ -64,7 +64,7 @@ class OIDCClient:
             doc = resp.json()
 
         _DISCOVERY_CACHE[self.issuer_url] = (doc, now)
-        return doc
+        return cast(dict[str, Any], doc)
 
     def build_authorization_url(
         self,
@@ -170,14 +170,14 @@ class OIDCClient:
             )
             if resp.status_code != 200:
                 raise OIDCError(f"Token exchange failed: HTTP {resp.status_code} {resp.text}")
-            return resp.json()
+            return cast(dict[str, Any], resp.json())
 
     def validate_id_token(
         self,
         id_token: str,
         *,
         nonce: str | None = None,
-        jwks: dict | None = None,
+        jwks: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Decode and validate an ID token.
 
@@ -224,7 +224,7 @@ class OIDCClient:
         if token_iss != self.issuer_url:
             raise OIDCError(f"Issuer mismatch: {token_iss} != {self.issuer_url}")
 
-        return claims
+        return cast(dict[str, Any], claims)
 
     @staticmethod
     def extract_groups(claims: dict[str, Any], group_claim: str = "") -> list[str]:

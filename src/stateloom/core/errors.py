@@ -351,7 +351,8 @@ class StateLoomConfigLockedError(StateLoomError):
         msg = f"Setting '{setting}' is admin-locked (value: {locked_value})"
         details = (
             reason
-            or "An admin has locked this setting via the dashboard. Contact your admin to unlock it."
+            or "An admin has locked this setting via the dashboard."
+            " Contact your admin to unlock it."
         )
         super().__init__(msg, details=details)
 

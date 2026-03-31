@@ -93,7 +93,11 @@ class VoteStrategy:
         # All models vote in parallel
         tasks = [
             _call_debater(
-                m, vote_messages, parent_session, per_model_budget, 1,
+                m,
+                vote_messages,
+                parent_session,
+                per_model_budget,
+                1,
                 durable=config.ee_consensus,
             )
             for m in models

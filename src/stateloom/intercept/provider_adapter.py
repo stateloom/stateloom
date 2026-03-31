@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from stateloom.middleware.base import StreamChunkInfo
@@ -62,7 +62,7 @@ class ProviderAdapter(Protocol):
         """
         ...
 
-    def extract_model(self, instance: Any, args: tuple, kwargs: dict[str, Any]) -> str:
+    def extract_model(self, instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
         """Extract the model name from the call arguments."""
         ...
 
@@ -93,7 +93,7 @@ class ProviderAdapter(Protocol):
         """Return (sub_object, method_name) pairs for instance wrapping via gate.wrap()."""
         ...
 
-    def normalize_request(self, args: tuple, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def normalize_request(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
         """Normalize positional args into kwargs for the middleware pipeline.
 
         Some providers (e.g. Gemini) pass the prompt as a positional arg.
@@ -154,6 +154,15 @@ class ProviderAdapter(Protocol):
         """Extract confidence from response text. Returns None to use default regex."""
         ...
 
+    def rebuild_call_args(
+        self,
+        normalized_kwargs: dict[str, Any],
+        original_args: tuple[Any, ...],
+        original_kwargs: dict[str, Any],
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """Rebuild call args from middleware-modified ``request_kwargs``."""
+        ...
+
     def prepare_chat(
         self,
         *,
@@ -208,8 +217,8 @@ class BaseProviderAdapter:
     def get_patch_targets(self) -> list[PatchTarget]:
         return []
 
-    def extract_model(self, instance: Any, args: tuple, kwargs: dict[str, Any]) -> str:
-        return kwargs.get("model", "unknown")
+    def extract_model(self, instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+        return cast(str, kwargs.get("model", "unknown"))
 
     def extract_tokens(self, response: Any) -> tuple[int, int, int]:
         return (0, 0, 0)
@@ -238,7 +247,7 @@ class BaseProviderAdapter:
             return (0, 0, 0)
 
     def is_streaming(self, kwargs: dict[str, Any]) -> bool:
-        return kwargs.get("stream", False)
+        return cast(bool, kwargs.get("stream", False))
 
     def extract_stream_tokens(self, chunk: Any, accumulated: dict[str, int]) -> dict[str, int]:
         return accumulated
@@ -261,8 +270,29 @@ class BaseProviderAdapter:
     def get_instance_targets(self, client: Any) -> list[tuple[Any, str]]:
         return []
 
-    def normalize_request(self, args: tuple, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def normalize_request(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
         return kwargs
+
+    def rebuild_call_args(
+        self,
+        normalized_kwargs: dict[str, Any],
+        original_args: tuple[Any, ...],
+        original_kwargs: dict[str, Any],
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """Rebuild call args from middleware-modified ``request_kwargs``.
+
+        Middleware (PII scanner, guardrails, etc.) may modify
+        ``ctx.request_kwargs["messages"]`` — for example, redacting PII
+        or stripping blocked messages.  The generic interceptor calls this
+        **before** the actual LLM call so that modifications are reflected.
+
+        Default: sync the ``messages`` list back to ``original_kwargs``
+        (works for OpenAI/Anthropic where messages live in kwargs).
+        Gemini overrides this to rebuild the positional ``contents`` arg.
+        """
+        if "messages" in normalized_kwargs and "messages" in original_kwargs:
+            original_kwargs["messages"] = normalized_kwargs["messages"]
+        return original_args, original_kwargs
 
     def extract_content(self, response: Any) -> str:
         """Default: try OpenAI-like choices[0].message.content."""

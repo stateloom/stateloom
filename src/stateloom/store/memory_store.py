@@ -38,13 +38,13 @@ class MemoryStore:
         self._secrets: dict[str, str] = {}
         self._virtual_keys: dict[str, Any] = {}  # id -> VirtualKey
         self._virtual_key_hashes: dict[str, str] = {}  # key_hash -> id
-        self._agents: dict[str, Any] = {}  # id -> Agent
+        self._agents: dict[str, Agent] = {}  # id -> Agent
         self._agent_versions: dict[str, Any] = {}  # id -> AgentVersion
-        self._admin_locks: dict[str, dict] = {}  # setting -> lock record
-        self._users: dict[str, Any] = {}  # id -> User
+        self._admin_locks: dict[str, dict[str, Any]] = {}  # setting -> lock record
+        self._users: dict[str, User] = {}  # id -> User
         self._user_team_roles: dict[str, Any] = {}  # id -> UserTeamRole
-        self._refresh_tokens: dict[str, dict] = {}  # token_hash -> record
-        self._oidc_providers: dict[str, Any] = {}  # id -> OIDCProvider
+        self._refresh_tokens: dict[str, dict[str, Any]] = {}  # token_hash -> record
+        self._oidc_providers: dict[str, OIDCProvider] = {}  # id -> OIDCProvider
         self._lock = threading.Lock()
 
     def save_session(self, session: Session) -> None:
@@ -142,7 +142,7 @@ class MemoryStore:
             events.sort(key=lambda e: e.timestamp)
             return events[offset : offset + limit]
 
-    def get_global_stats(self) -> dict:
+    def get_global_stats(self) -> dict[str, Any]:
         with self._lock:
             sessions = list(self._sessions.values())
             return {
@@ -164,9 +164,7 @@ class MemoryStore:
 
     def get_call_counts(self) -> dict[str, int]:
         with self._lock:
-            llm_events = [
-                e for e in self._events if getattr(e, "event_type", None) == "llm_call"
-            ]
+            llm_events = [e for e in self._events if getattr(e, "event_type", None) == "llm_call"]
             local = sum(1 for e in llm_events if getattr(e, "provider", "") == "local")
             return {
                 "total": len(llm_events),
@@ -176,9 +174,7 @@ class MemoryStore:
 
     def get_cost_by_model(self) -> dict[str, float]:
         with self._lock:
-            llm_events = [
-                e for e in self._events if getattr(e, "event_type", None) == "llm_call"
-            ]
+            llm_events = [e for e in self._events if getattr(e, "event_type", None) == "llm_call"]
             model_costs: dict[str, float] = {}
             for e in llm_events:
                 model = getattr(e, "model", "unknown") or "unknown"
@@ -404,11 +400,11 @@ class MemoryStore:
                 "locked_at": datetime.now(timezone.utc).isoformat(),
             }
 
-    def get_admin_lock(self, setting: str) -> dict | None:
+    def get_admin_lock(self, setting: str) -> dict[str, Any] | None:
         with self._lock:
             return self._admin_locks.get(setting)
 
-    def list_admin_locks(self) -> list[dict]:
+    def list_admin_locks(self) -> list[dict[str, Any]]:
         with self._lock:
             return sorted(self._admin_locks.values(), key=lambda d: d["setting"])
 
@@ -471,7 +467,7 @@ class MemoryStore:
 
     # --- Hierarchy queries ---
 
-    def get_org_stats(self, org_id: str) -> dict:
+    def get_org_stats(self, org_id: str) -> dict[str, Any]:
         with self._lock:
             sessions = [s for s in self._sessions.values() if s.org_id == org_id]
             return {
@@ -515,7 +511,7 @@ class MemoryStore:
         with self._lock:
             return self._jobs.pop(job_id, None) is not None
 
-    def get_job_stats(self) -> dict:
+    def get_job_stats(self) -> dict[str, Any]:
         with self._lock:
             jobs = list(self._jobs.values())
             by_status: dict[str, int] = {}
@@ -592,7 +588,7 @@ class MemoryStore:
                     max_ver = v.version_number
             return max_ver + 1
 
-    def get_team_stats(self, team_id: str) -> dict:
+    def get_team_stats(self, team_id: str) -> dict[str, Any]:
         with self._lock:
             sessions = [s for s in self._sessions.values() if s.team_id == team_id]
             return {
@@ -693,7 +689,7 @@ class MemoryStore:
                 "revoked": False,
             }
 
-    def get_refresh_token(self, token_hash: str) -> dict | None:
+    def get_refresh_token(self, token_hash: str) -> dict[str, Any] | None:
         with self._lock:
             return self._refresh_tokens.get(token_hash)
 

@@ -1,4 +1,4 @@
-"""Tests for PII scanner conversation history deduplication.
+"""Tests for PII scanner conversation history handling.
 
 Validates that the PII scanner handles CLI-style flows where the full
 conversation history is resent on every turn.
@@ -6,8 +6,8 @@ conversation history is resent on every turn.
 - BLOCK mode (new PII): blocks the entire request, creates event.
 - BLOCK mode (old PII): strips the offending message from the request
   entirely — PII never reaches the LLM, conversation isn't stuck.
-- REDACT mode: silently re-redacts old content (no duplicate events).
-- AUDIT mode: only logs events for new content.
+- REDACT mode: re-redacts content and creates events on every call.
+- AUDIT mode: logs events on every call.
 """
 
 from __future__ import annotations
@@ -27,13 +27,22 @@ def _make_ctx(
     messages: list[dict],
     session: Session | None = None,
     system: str = "",
+    *,
+    proxy: bool = True,
 ) -> MiddlewareContext:
-    """Create a MiddlewareContext with the given messages."""
+    """Create a MiddlewareContext with the given messages.
+
+    *proxy* defaults to ``True`` because the existing tests exercise the
+    CLI/proxy path (Phase 1 strip, active-turn detection, cooldown timers).
+    Set ``proxy=False`` to exercise the SDK path.
+    """
     if session is None:
         session = Session(id="test-session")
     kwargs: dict = {"messages": messages}
     if system:
         kwargs["system"] = system
+    if proxy:
+        kwargs["_proxy"] = True
     return MiddlewareContext(
         session=session,
         config=StateLoomConfig(),
@@ -187,7 +196,7 @@ class TestBlockOldPIIStripped:
         assert remaining[2]["content"] == "tell me a joke"
 
     async def test_retry_same_messages_stripped_during_cooldown(self):
-        """CLI retry (< 2s after block) → active turn stripped, request passes."""
+        """CLI retry (< 2s after block) → all messages stripped → blocked."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[
@@ -208,20 +217,21 @@ class TestBlockOldPIIStripped:
         with pytest.raises(StateLoomPIIBlockedError):
             await scanner._do_process(ctx1, _passthrough)
 
-        # Retry (immediately, within cooldown) → message stripped, passes through
+        # Retry (immediately, within cooldown) → all messages stripped → blocked
+        # (empty messages would crash the provider SDK, so we raise instead)
         ctx2 = _make_ctx(
             [{"role": "user", "content": "my ssn is 123-45-6789"}],
             session=session,
         )
-        await scanner._do_process(ctx2, _passthrough)
-        # The SSN message was stripped entirely
-        assert len(ctx2.request_kwargs["messages"]) == 0
+        with pytest.raises(StateLoomPIIBlockedError):
+            await scanner._do_process(ctx2, _passthrough)
 
     async def test_retry_after_cooldown_stripped(self):
-        """Retry after cooldown expires → active turn stripped, passes through.
+        """Retry after cooldown expires → all messages stripped → blocked.
 
-        Phase 1 strips messages containing previously-blocked PII from the
-        active turn so the PII-contaminated text never reaches the LLM.
+        Phase 1 strips messages containing previously-blocked PII. When all
+        messages are stripped, we raise StateLoomPIIBlockedError instead of
+        forwarding an empty request that would crash the provider SDK.
         """
         config = StateLoomConfig(
             pii_enabled=True,
@@ -249,11 +259,11 @@ class TestBlockOldPIIStripped:
             [{"role": "user", "content": "my ssn is 123-45-6789"}],
             session=session,
         )
-        await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.request_kwargs["messages"]) == 0
+        with pytest.raises(StateLoomPIIBlockedError):
+            await scanner._do_process(ctx2, _passthrough)
 
     async def test_assistant_prefill_with_ssn_stripped_during_cooldown(self):
-        """CLI sends SSN + empty assistant prefill during cooldown → SSN message stripped."""
+        """CLI sends SSN + empty assistant prefill during cooldown → all stripped → blocked."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[
@@ -273,6 +283,7 @@ class TestBlockOldPIIStripped:
         with pytest.raises(StateLoomPIIBlockedError):
             await scanner._do_process(ctx1, _passthrough)
 
+        # SSN message stripped + orphaned assistant cleaned up → empty → blocked
         ctx2 = _make_ctx(
             [
                 {"role": "user", "content": "my ssn is 123-45-6789"},
@@ -280,13 +291,11 @@ class TestBlockOldPIIStripped:
             ],
             session=session,
         )
-        await scanner._do_process(ctx2, _passthrough)
-        # SSN message stripped; empty assistant also cleaned up
-        remaining = ctx2.request_kwargs["messages"]
-        assert all("123-45-6789" not in str(m.get("content", "")) for m in remaining)
+        with pytest.raises(StateLoomPIIBlockedError):
+            await scanner._do_process(ctx2, _passthrough)
 
     async def test_assistant_prefill_list_content_stripped_during_cooldown(self):
-        """CLI sends SSN + list-format assistant prefill during cooldown → SSN message stripped."""
+        """CLI sends SSN + list-format assistant prefill during cooldown → all stripped → blocked."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[
@@ -306,6 +315,7 @@ class TestBlockOldPIIStripped:
         with pytest.raises(StateLoomPIIBlockedError):
             await scanner._do_process(ctx1, _passthrough)
 
+        # SSN stripped + orphaned list-format assistant cleaned up → empty → blocked
         ctx2 = _make_ctx(
             [
                 {"role": "user", "content": "my ssn is 123-45-6789"},
@@ -313,9 +323,8 @@ class TestBlockOldPIIStripped:
             ],
             session=session,
         )
-        await scanner._do_process(ctx2, _passthrough)
-        remaining = ctx2.request_kwargs["messages"]
-        assert all("123-45-6789" not in str(m.get("content", "")) for m in remaining)
+        with pytest.raises(StateLoomPIIBlockedError):
+            await scanner._do_process(ctx2, _passthrough)
 
     async def test_nonempty_assistant_preserved_after_strip(self):
         """After stripping SSN at index 0, orphaned leading assistant is also
@@ -402,7 +411,7 @@ class TestBlockOldPIIStripped:
 
 
 class TestRedactDedup:
-    """REDACT mode uses dedup — old content silently re-redacted."""
+    """REDACT mode creates events on every call and always redacts."""
 
     async def test_first_redact_creates_event(self):
         """New content with REDACT PII → event created, content redacted."""
@@ -421,8 +430,8 @@ class TestRedactDedup:
         assert len(ctx.events) == 1
         assert "test@secret.com" not in ctx.request_kwargs["messages"][0]["content"]
 
-    async def test_old_redact_silently_reredacted(self):
-        """Old content with REDACT PII → silently re-redacted, no event."""
+    async def test_old_redact_creates_event_again(self):
+        """Old content with REDACT PII → re-redacted with new event."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.REDACT)],
@@ -445,7 +454,7 @@ class TestRedactDedup:
             session=session,
         )
         await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.events) == 0
+        assert len(ctx2.events) == 1
         assert "test@secret.com" not in ctx2.request_kwargs["messages"][0]["content"]
 
 
@@ -455,7 +464,7 @@ class TestRedactDedup:
 
 
 class TestAuditDedup:
-    """AUDIT mode uses dedup — events only for new content."""
+    """AUDIT mode creates events on every call."""
 
     async def test_first_audit_creates_event(self):
         config = StateLoomConfig(
@@ -471,9 +480,9 @@ class TestAuditDedup:
         )
         await scanner._do_process(ctx, _passthrough)
         assert len(ctx.events) == 1
-        assert "_pii_seen_hashes" in session.metadata
 
-    async def test_old_audit_no_duplicate_event(self):
+    async def test_old_audit_creates_event_again(self):
+        """Same PII on second call still creates an event."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.AUDIT)],
@@ -495,9 +504,10 @@ class TestAuditDedup:
             session=session,
         )
         await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.events) == 0
+        assert len(ctx2.events) == 1
 
-    async def test_new_content_creates_event(self):
+    async def test_multiple_pii_values_create_events(self):
+        """Multiple PII values across messages all create events."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.AUDIT)],
@@ -519,8 +529,7 @@ class TestAuditDedup:
             session=session,
         )
         await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.events) == 1
-        assert ctx2.events[0].pii_type == "email"
+        assert len(ctx2.events) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -645,9 +654,10 @@ class TestCacheControlIgnored:
 
 
 class TestSystemPromptDedup:
-    """System prompt deduplication."""
+    """System prompt scanning creates events on every call."""
 
-    async def test_same_system_prompt_scanned_once(self):
+    async def test_same_system_prompt_scanned_every_call(self):
+        """Same system prompt PII creates events on each call."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.AUDIT)],
@@ -672,7 +682,7 @@ class TestSystemPromptDedup:
             system="Contact support@company.com for help",
         )
         await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.events) == 0
+        assert len(ctx2.events) == 1
 
     async def test_changed_system_prompt_rescanned(self):
         config = StateLoomConfig(
@@ -766,8 +776,7 @@ class TestDuplicateContent:
         )
         with pytest.raises(StateLoomPIIBlockedError):
             await scanner._do_process(ctx, _passthrough)
-        # First occurrence is new (blocks), second is old within same request (strip)
-        # But since we're blocking on the first, only 1 event
+        # First occurrence (history) → strip, second (active turn) → block with event
         assert len(ctx.events) == 1
 
 
@@ -791,10 +800,8 @@ class TestMetadataRestoration:
         )
         with gate.session(session_id="resume-test") as session:
             session.metadata["_pii_blocked_hashes"] = ["abc", "def"]
-            session.metadata["_pii_seen_hashes"] = ["abc", "def", "ghi"]
         with gate.session(session_id="resume-test") as session:
             assert session.metadata.get("_pii_blocked_hashes") == ["abc", "def"]
-            assert session.metadata.get("_pii_seen_hashes") == ["abc", "def", "ghi"]
 
     def test_estimated_api_cost_restored(self):
         import stateloom
@@ -1004,8 +1011,8 @@ class TestFormatChangeRobustness:
         assert ctx2.request_kwargs["messages"][0]["content"] == "hello"
         assert len(ctx2.events) == 0
 
-    async def test_redact_dedup_across_format_change(self):
-        """Email in string then list-of-blocks → no duplicate event."""
+    async def test_redact_across_format_change(self):
+        """Email in string then list-of-blocks → event on every call."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.REDACT)],
@@ -1035,8 +1042,7 @@ class TestFormatChangeRobustness:
             session=session,
         )
         await scanner._do_process(ctx2, _passthrough)
-        # No new event — same PII value already seen
-        assert len(ctx2.events) == 0
+        assert len(ctx2.events) == 1
 
     async def test_no_raw_pii_in_metadata(self):
         """Verify only SHA-256 hex digests in metadata, no raw PII."""
@@ -1063,9 +1069,7 @@ class TestFormatChangeRobustness:
 
         # Check metadata keys
         blocked = session.metadata.get("_pii_blocked_hashes", [])
-        seen = session.metadata.get("_pii_seen_hashes", [])
         assert len(blocked) >= 1
-        assert len(seen) >= 1
 
         # Verify they're SHA-256 hex digests (64 hex chars)
         for h in blocked:
@@ -1390,7 +1394,7 @@ class TestCLIConcatenation:
         assert any(m.get("content") == "hello" for m in msgs)
 
     async def test_old_ssn_in_list_content_last_msg_stripped(self):
-        """Old SSN in list-of-blocks last user message → stripped."""
+        """Old SSN in list-of-blocks last user message → all stripped → blocked."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[
@@ -1426,10 +1430,9 @@ class TestCLIConcatenation:
             ],
             session=session,
         )
-        # Phase 1 strips the message entirely
-        await scanner._do_process(ctx2, _passthrough)
-        msgs = ctx2.request_kwargs["messages"]
-        assert len(msgs) == 0
+        # Phase 1 strips the only message → empty → blocked
+        with pytest.raises(StateLoomPIIBlockedError):
+            await scanner._do_process(ctx2, _passthrough)
 
     async def test_new_ssn_in_last_msg_still_blocks(self):
         """New (never-seen) SSN in last user message → still blocked."""
@@ -1488,11 +1491,196 @@ class TestCLIConcatenation:
         # Expire cooldown
         session.metadata["_pii_last_block_ts"] = session.metadata["_pii_last_block_ts"] - 3.0
 
-        # Turn 2: old SSN + new email in last message
+        # Turn 2: old SSN + new email in last message → stripped → blocked
         ctx2 = _make_ctx(
             [{"role": "user", "content": "my ssn is 123-45-6789\nemail: admin@secret.com"}],
             session=session,
         )
-        # Phase 1 strips the entire message; no PII reaches Phase 2
+        # Phase 1 strips the only message → empty → blocked
+        with pytest.raises(StateLoomPIIBlockedError):
+            await scanner._do_process(ctx2, _passthrough)
+
+
+# ---------------------------------------------------------------------------
+# SDK flow — no Phase 1, no dedup, every call treated independently
+# ---------------------------------------------------------------------------
+
+
+class TestSDKFlowBlock:
+    """SDK (non-proxy) calls: BLOCK creates event every time, no Phase 1."""
+
+    async def test_sdk_block_creates_event(self):
+        """SDK block mode → event on first call."""
+        config = StateLoomConfig(
+            pii_enabled=True,
+            pii_rules=[
+                PIIRule(
+                    pattern="ssn", mode=PIIMode.BLOCK, on_middleware_failure=FailureAction.BLOCK
+                )
+            ],
+        )
+        store = MemoryStore()
+        scanner = PIIScannerMiddleware(config, store=store)
+        session = Session(id="sdk-s1")
+
+        ctx = _make_ctx(
+            [{"role": "user", "content": "my ssn is 123-45-6789"}],
+            session=session,
+            proxy=False,
+        )
+        with pytest.raises(StateLoomPIIBlockedError):
+            await scanner._do_process(ctx, _passthrough)
+        assert len(ctx.events) == 1
+        assert ctx.events[0].action_taken == "blocked"
+
+    async def test_sdk_block_rerun_same_session_still_blocks_with_event(self):
+        """SDK re-run with same session ID → still blocks with new event.
+
+        This is the critical difference from proxy: proxy Phase 1 would
+        silently strip the message, SDK always blocks.
+        """
+        config = StateLoomConfig(
+            pii_enabled=True,
+            pii_rules=[
+                PIIRule(
+                    pattern="ssn", mode=PIIMode.BLOCK, on_middleware_failure=FailureAction.BLOCK
+                )
+            ],
+        )
+        store = MemoryStore()
+        scanner = PIIScannerMiddleware(config, store=store)
+        session = Session(id="sdk-s1")
+
+        # Call 1
+        ctx1 = _make_ctx(
+            [{"role": "user", "content": "my ssn is 123-45-6789"}],
+            session=session,
+            proxy=False,
+        )
+        with pytest.raises(StateLoomPIIBlockedError):
+            await scanner._do_process(ctx1, _passthrough)
+        assert len(ctx1.events) == 1
+
+        # Call 2 — same session, same content → still blocked with event
+        ctx2 = _make_ctx(
+            [{"role": "user", "content": "my ssn is 123-45-6789"}],
+            session=session,
+            proxy=False,
+        )
+        with pytest.raises(StateLoomPIIBlockedError):
+            await scanner._do_process(ctx2, _passthrough)
+        assert len(ctx2.events) == 1
+
+
+class TestSDKFlowRedact:
+    """SDK (non-proxy) calls: REDACT creates event every time."""
+
+    async def test_sdk_redact_creates_event(self):
+        config = StateLoomConfig(
+            pii_enabled=True,
+            pii_rules=[PIIRule(pattern="email", mode=PIIMode.REDACT)],
+        )
+        scanner = PIIScannerMiddleware(config)
+        session = Session(id="sdk-s1")
+
+        ctx = _make_ctx(
+            [{"role": "user", "content": "My email is test@secret.com"}],
+            session=session,
+            proxy=False,
+        )
+        await scanner._do_process(ctx, _passthrough)
+        assert len(ctx.events) == 1
+        assert "test@secret.com" not in ctx.request_kwargs["messages"][0]["content"]
+
+    async def test_sdk_redact_rerun_creates_event_again(self):
+        config = StateLoomConfig(
+            pii_enabled=True,
+            pii_rules=[PIIRule(pattern="email", mode=PIIMode.REDACT)],
+        )
+        scanner = PIIScannerMiddleware(config)
+        session = Session(id="sdk-s1")
+
+        ctx1 = _make_ctx(
+            [{"role": "user", "content": "My email is test@secret.com"}],
+            session=session,
+            proxy=False,
+        )
+        await scanner._do_process(ctx1, _passthrough)
+        assert len(ctx1.events) == 1
+
+        ctx2 = _make_ctx(
+            [{"role": "user", "content": "My email is test@secret.com"}],
+            session=session,
+            proxy=False,
+        )
         await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.request_kwargs["messages"]) == 0
+        assert len(ctx2.events) == 1
+
+
+class TestSDKFlowAudit:
+    """SDK (non-proxy) calls: AUDIT creates event every time."""
+
+    async def test_sdk_audit_creates_event(self):
+        config = StateLoomConfig(
+            pii_enabled=True,
+            pii_rules=[PIIRule(pattern="email", mode=PIIMode.AUDIT)],
+        )
+        scanner = PIIScannerMiddleware(config)
+        session = Session(id="sdk-s1")
+
+        ctx = _make_ctx(
+            [{"role": "user", "content": "Email: user@example.com"}],
+            session=session,
+            proxy=False,
+        )
+        await scanner._do_process(ctx, _passthrough)
+        assert len(ctx.events) == 1
+
+    async def test_sdk_audit_rerun_creates_event_again(self):
+        config = StateLoomConfig(
+            pii_enabled=True,
+            pii_rules=[PIIRule(pattern="email", mode=PIIMode.AUDIT)],
+        )
+        scanner = PIIScannerMiddleware(config)
+        session = Session(id="sdk-s1")
+
+        ctx1 = _make_ctx(
+            [{"role": "user", "content": "Email: user@example.com"}],
+            session=session,
+            proxy=False,
+        )
+        await scanner._do_process(ctx1, _passthrough)
+
+        ctx2 = _make_ctx(
+            [{"role": "user", "content": "Email: user@example.com"}],
+            session=session,
+            proxy=False,
+        )
+        await scanner._do_process(ctx2, _passthrough)
+        assert len(ctx2.events) == 1
+
+
+class TestSDKCliInternalBypass:
+    """_cli_internal still skips PII scanning entirely (both paths)."""
+
+    async def test_cli_internal_skips_scanning(self):
+        config = StateLoomConfig(
+            pii_enabled=True,
+            pii_rules=[
+                PIIRule(
+                    pattern="ssn", mode=PIIMode.BLOCK, on_middleware_failure=FailureAction.BLOCK
+                )
+            ],
+        )
+        scanner = PIIScannerMiddleware(config)
+        session = Session(id="sdk-s1")
+
+        ctx = _make_ctx(
+            [{"role": "user", "content": "my ssn is 123-45-6789"}],
+            session=session,
+            proxy=False,
+        )
+        ctx.request_kwargs["_cli_internal"] = True
+        result = await scanner._do_process(ctx, _passthrough)
+        assert result == "LLM_RESPONSE"
+        assert len(ctx.events) == 0

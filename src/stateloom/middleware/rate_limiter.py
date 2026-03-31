@@ -157,7 +157,10 @@ class RateLimiterMiddleware:
                 logger.warning(
                     "Rate limiter: queue full, rejecting request for team=%s "
                     "(queue_size=%d, max=%d, tps=%.1f)",
-                    team_id, bucket.queue_size, bucket.max_queue_size, bucket.tps,
+                    team_id,
+                    bucket.queue_size,
+                    bucket.max_queue_size,
+                    bucket.tps,
                 )
                 event = RateLimitEvent(
                     session_id=ctx.session.id,
@@ -183,7 +186,9 @@ class RateLimiterMiddleware:
                 # Enqueue
                 logger.debug(
                     "Rate limiter: queuing request for team=%s (queue_size=%d, priority=%d)",
-                    team_id, bucket.queue_size, bucket.priority,
+                    team_id,
+                    bucket.queue_size,
+                    bucket.priority,
                 )
                 req = _QueuedRequest(
                     event=threading.Event(),
@@ -234,7 +239,9 @@ class RateLimiterMiddleware:
             # Timeout
             logger.warning(
                 "Rate limiter: queue timeout for team=%s after %.0fms (timeout=%.1fs)",
-                team_id, wait_ms, bucket.queue_timeout,
+                team_id,
+                wait_ms,
+                bucket.queue_timeout,
             )
             event = RateLimitEvent(
                 session_id=ctx.session.id,
@@ -376,9 +383,9 @@ class RateLimiterMiddleware:
         with self._buckets_lock:
             self._buckets.pop(team_id, None)
 
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """Return current rate limiter state for all teams."""
-        teams: dict[str, dict] = {}
+        teams: dict[str, dict[str, Any]] = {}
         with self._buckets_lock:
             for team_id, bucket in self._buckets.items():
                 with bucket.lock:

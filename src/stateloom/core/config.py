@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -230,7 +230,7 @@ class StateLoomConfig(BaseSettings):
 
     # Dashboard
     dashboard: bool = True
-    dashboard_port: int = 4781
+    dashboard_port: int = 4782
     dashboard_host: str = "127.0.0.1"
     dashboard_api_key: str = ""
 
@@ -238,7 +238,7 @@ class StateLoomConfig(BaseSettings):
     budget_per_session: float | None = None
     budget_global: float | None = None
     budget_action: BudgetAction = BudgetAction.HARD_STOP
-    budget_on_middleware_failure: FailureAction | None = None
+    budget_on_middleware_failure: FailureAction = FailureAction.BLOCK
 
     # PII
     pii_enabled: bool = False
@@ -287,7 +287,8 @@ class StateLoomConfig(BaseSettings):
     cache_db_path: str = ".stateloom/cache.db"
 
     # Loop detection
-    loop_exact_threshold: int = 3
+    loop_detection_enabled: bool = False
+    loop_exact_threshold: int = 5
     loop_semantic_enabled: bool = False
     loop_semantic_threshold: float = 0.92
 
@@ -623,7 +624,7 @@ class StateLoomConfig(BaseSettings):
             data = yaml.safe_load(f) or {}
 
         # Flatten nested YAML structure
-        flat: dict = {}
+        flat: dict[str, Any] = {}
 
         # Top-level keys
         for key in ("auto_patch", "fail_open", "log_level", "store_payloads", "debug"):

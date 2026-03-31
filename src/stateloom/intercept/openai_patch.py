@@ -8,11 +8,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stateloom.core.context import get_current_replay_engine
 from stateloom.core.types import Provider
-from stateloom.intercept.unpatch import register_patch
 
 if TYPE_CHECKING:
     from stateloom.gate import Gate
@@ -33,7 +32,7 @@ def patch_openai(gate: Gate) -> list[str]:
 
 def _extract_model(kwargs: dict[str, Any]) -> str:
     """Extract model name from OpenAI request kwargs."""
-    return kwargs.get("model", "unknown")
+    return cast(str, kwargs.get("model", "unknown"))
 
 
 def _extract_tokens_from_response(response: Any) -> tuple[int, int, int]:
@@ -67,7 +66,7 @@ _REPLAY_SENTINEL = object()
 
 
 def _intercept_sync(
-    gate: Gate, original: Any, instance: Any, args: tuple, kwargs: dict[str, Any]
+    gate: Gate, original: Any, instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Any:
     """Intercept a sync OpenAI call through the middleware pipeline."""
     model = _extract_model(kwargs)
@@ -116,7 +115,7 @@ def _intercept_sync(
 
 
 async def _intercept_async(
-    gate: Gate, original: Any, instance: Any, args: tuple, kwargs: dict[str, Any]
+    gate: Gate, original: Any, instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Any:
     """Intercept an async OpenAI call through the middleware pipeline."""
     model = _extract_model(kwargs)
@@ -163,7 +162,7 @@ async def _intercept_async(
 
 
 def _wrap_stream_sync(
-    gate: Gate, stream: Any, session: Any, model: str, step: int, kwargs: dict
+    gate: Gate, stream: Any, session: Any, model: str, step: int, kwargs: dict[str, Any]
 ) -> Any:
     """Wrap a sync streaming response to capture tokens on completion.
 
@@ -209,7 +208,7 @@ def _wrap_stream_sync(
 
 
 async def _wrap_stream_async(
-    gate: Gate, stream: Any, session: Any, model: str, step: int, kwargs: dict
+    gate: Gate, stream: Any, session: Any, model: str, step: int, kwargs: dict[str, Any]
 ) -> Any:
     """Wrap an async streaming response to capture tokens on completion.
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import PlainTextResponse
@@ -20,7 +20,7 @@ def create_observability_router(gate: Gate) -> APIRouter:
         window: str = Query(default="1h", pattern="^(1h|6h|24h|7d)$"),
         org_id: str = Query(default=""),
         team_id: str = Query(default=""),
-    ):
+    ) -> Any:
         return gate._observability_aggregator.get_timeseries(window, org_id=org_id, team_id=team_id)
 
     @router.get("/observability/latency")
@@ -28,7 +28,7 @@ def create_observability_router(gate: Gate) -> APIRouter:
         window: str = Query(default="1h", pattern="^(1h|6h|24h|7d)$"),
         org_id: str = Query(default=""),
         team_id: str = Query(default=""),
-    ):
+    ) -> Any:
         return gate._observability_aggregator.get_latency(window, org_id=org_id, team_id=team_id)
 
     @router.get("/observability/breakdown")
@@ -36,7 +36,7 @@ def create_observability_router(gate: Gate) -> APIRouter:
         window: str = Query(default="1h", pattern="^(1h|6h|24h|7d)$"),
         org_id: str = Query(default=""),
         team_id: str = Query(default=""),
-    ):
+    ) -> Any:
         return gate._observability_aggregator.get_breakdown(window, org_id=org_id, team_id=team_id)
 
     return router

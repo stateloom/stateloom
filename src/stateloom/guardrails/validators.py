@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass
@@ -25,6 +25,6 @@ class GuardrailValidator(Protocol):
     @property
     def name(self) -> str: ...
 
-    def validate_input(self, messages: list[dict]) -> GuardrailResult: ...
+    def validate_input(self, messages: list[dict[str, Any]]) -> GuardrailResult: ...
 
     def validate_output(self, response_text: str, system_prompt: str) -> GuardrailResult: ...

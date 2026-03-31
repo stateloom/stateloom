@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from stateloom.core.config import ComplianceProfile, PIIRule
-from stateloom.core.types import PIIMode
+from stateloom.core.types import FailureAction, PIIMode
 
 
 def gdpr_profile() -> ComplianceProfile:
@@ -25,10 +25,18 @@ def gdpr_profile() -> ComplianceProfile:
             r"https://.*\.azure\.com(/.*)?",
         ],
         pii_rules=[
-            PIIRule(pattern="vat_id", mode=PIIMode.BLOCK, on_middleware_failure="block"),
-            PIIRule(pattern="national_id_eu", mode=PIIMode.BLOCK, on_middleware_failure="block"),
-            PIIRule(pattern="iban", mode=PIIMode.BLOCK, on_middleware_failure="block"),
-            PIIRule(pattern="ssn", mode=PIIMode.BLOCK, on_middleware_failure="block"),
+            PIIRule(
+                pattern="vat_id",
+                mode=PIIMode.BLOCK,
+                on_middleware_failure=FailureAction.BLOCK,
+            ),
+            PIIRule(
+                pattern="national_id_eu",
+                mode=PIIMode.BLOCK,
+                on_middleware_failure=FailureAction.BLOCK,
+            ),
+            PIIRule(pattern="iban", mode=PIIMode.BLOCK, on_middleware_failure=FailureAction.BLOCK),
+            PIIRule(pattern="ssn", mode=PIIMode.BLOCK, on_middleware_failure=FailureAction.BLOCK),
             PIIRule(pattern="email", mode=PIIMode.REDACT),
             PIIRule(pattern="phone", mode=PIIMode.REDACT),
         ],
@@ -48,11 +56,15 @@ def hipaa_profile() -> ComplianceProfile:
             PIIRule(
                 pattern="medical_record_number",
                 mode=PIIMode.BLOCK,
-                on_middleware_failure="block",
+                on_middleware_failure=FailureAction.BLOCK,
             ),
-            PIIRule(pattern="health_plan_id", mode=PIIMode.BLOCK, on_middleware_failure="block"),
-            PIIRule(pattern="npi", mode=PIIMode.BLOCK, on_middleware_failure="block"),
-            PIIRule(pattern="ssn", mode=PIIMode.BLOCK, on_middleware_failure="block"),
+            PIIRule(
+                pattern="health_plan_id",
+                mode=PIIMode.BLOCK,
+                on_middleware_failure=FailureAction.BLOCK,
+            ),
+            PIIRule(pattern="npi", mode=PIIMode.BLOCK, on_middleware_failure=FailureAction.BLOCK),
+            PIIRule(pattern="ssn", mode=PIIMode.BLOCK, on_middleware_failure=FailureAction.BLOCK),
             PIIRule(pattern="email", mode=PIIMode.REDACT),
             PIIRule(pattern="phone", mode=PIIMode.REDACT),
             PIIRule(pattern="date_of_birth", mode=PIIMode.REDACT),
@@ -67,9 +79,17 @@ def ccpa_profile() -> ComplianceProfile:
         session_ttl_days=90,
         cache_ttl_seconds=7776000,  # 90 days
         pii_rules=[
-            PIIRule(pattern="ssn", mode=PIIMode.BLOCK, on_middleware_failure="block"),
-            PIIRule(pattern="california_dl", mode=PIIMode.BLOCK, on_middleware_failure="block"),
-            PIIRule(pattern="credit_card", mode=PIIMode.BLOCK, on_middleware_failure="block"),
+            PIIRule(pattern="ssn", mode=PIIMode.BLOCK, on_middleware_failure=FailureAction.BLOCK),
+            PIIRule(
+                pattern="california_dl",
+                mode=PIIMode.BLOCK,
+                on_middleware_failure=FailureAction.BLOCK,
+            ),
+            PIIRule(
+                pattern="credit_card",
+                mode=PIIMode.BLOCK,
+                on_middleware_failure=FailureAction.BLOCK,
+            ),
             PIIRule(pattern="email", mode=PIIMode.REDACT),
         ],
     )

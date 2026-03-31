@@ -13,7 +13,7 @@ def run_migrations_online() -> None:
     """Run migrations using a live database connection."""
     from sqlalchemy import create_engine
 
-    url = context.config.get_main_option("sqlalchemy.url")
+    url = context.config.get_main_option("sqlalchemy.url") or ""
     connectable = create_engine(url)
 
     with connectable.connect() as connection:

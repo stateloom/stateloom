@@ -223,9 +223,7 @@ class _SimilarityBridge:
         event.cloud_tokens = self.cloud_tokens
         event.cloud_latency_ms = self.cloud_latency_ms
         event.latency_ratio = (
-            event.local_latency_ms / event.cloud_latency_ms
-            if event.cloud_latency_ms > 0
-            else 0.0
+            event.local_latency_ms / event.cloud_latency_ms if event.cloud_latency_ms > 0 else 0.0
         )
         event.cost_saved = self.cloud_cost  # Local is free
 
@@ -469,11 +467,7 @@ class ShadowMiddleware:
         # Skip if no models configured, already a local call,
         # streaming (comparison requires full response text),
         # or this call is itself a shadow call (prevent recursion)
-        if (
-            not shadow_models
-            or ctx.provider == Provider.LOCAL
-            or ctx.is_streaming
-        ):
+        if not shadow_models or ctx.provider == Provider.LOCAL or ctx.is_streaming:
             return await call_next(ctx)
 
         # Compliance check: block_shadow only applies to local model candidates.
@@ -500,9 +494,7 @@ class ShadowMiddleware:
         eligible, skip_reason = self._check_eligibility(ctx, has_cloud_candidate=has_cloud)
         if not eligible:
             self._increment_skip(skip_reason)
-            logger.debug(
-                "Model test: skipping — %s (session=%s)", skip_reason, ctx.session.id
-            )
+            logger.debug("Model test: skipping — %s (session=%s)", skip_reason, ctx.session.id)
             return await call_next(ctx)
 
         # Snapshot request kwargs before downstream middleware mutates them
@@ -641,7 +633,6 @@ class ShadowMiddleware:
 
         Returns ``(response_text, prompt_tokens, completion_tokens)``.
         """
-        import httpx
 
         provider = self._resolve_cloud_provider(model)
         messages = request_kwargs.get("messages", [])
@@ -649,7 +640,7 @@ class ShadowMiddleware:
 
         if provider == "anthropic":
             return self._call_anthropic(model, messages, request_kwargs, timeout)
-        elif provider == "google":
+        elif provider in ("google", "gemini"):
             return self._call_google(model, messages, request_kwargs, timeout)
         else:
             return self._call_openai(model, messages, request_kwargs, timeout)
@@ -914,9 +905,7 @@ class ShadowMiddleware:
         # (SQLite uses INSERT OR REPLACE on event id)
         import hashlib
 
-        det_id = hashlib.sha256(
-            f"{session_id}:shadow:{shadow_model}".encode()
-        ).hexdigest()[:16]
+        det_id = hashlib.sha256(f"{session_id}:shadow:{shadow_model}".encode()).hexdigest()[:16]
 
         event = ShadowDraftEvent(
             id=det_id,
@@ -998,6 +987,6 @@ class ShadowMiddleware:
     def shutdown(self) -> None:
         """Clean up the thread pool executor and HTTP client."""
         if self._executor is not None:
-            self._executor.shutdown(wait=False)
+            self._executor.shutdown(wait=True)
             self._executor = None
         self._client.close()

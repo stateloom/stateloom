@@ -6,7 +6,7 @@ import logging
 import secrets
 import time
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -49,7 +49,7 @@ def _get_jwt_secret(store: Any, config: Any) -> str:
 
     stored = store.get_secret("jwt_secret_key")
     if stored:
-        return stored
+        return cast(str, stored)
 
     new_secret = secrets.token_urlsafe(64)
     store.save_secret("jwt_secret_key", new_secret)
@@ -156,7 +156,7 @@ def decode_refresh_token(
     token: str,
     secret: str,
     algorithm: str = "HS256",
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Decode a refresh token. Returns dict payload or None."""
     if not _JWT_AVAILABLE:
         return None
@@ -165,6 +165,6 @@ def decode_refresh_token(
         payload = pyjwt.decode(token, secret, algorithms=[algorithm])
         if payload.get("type") != "refresh":
             return None
-        return payload
+        return cast(dict[str, Any], payload)
     except Exception:
         return None

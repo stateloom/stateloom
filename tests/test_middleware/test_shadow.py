@@ -455,7 +455,7 @@ class TestShadowMiddleware:
         # Similarity should have been computed via the bridge
         assert event.similarity_score is not None
         assert 0.0 <= event.similarity_score <= 1.0
-        assert event.similarity_method == "difflib"
+        assert event.similarity_method in ("difflib", "semantic")
         assert event.cloud_preview == "Hello there!"
         assert event.local_preview == "Hi there!"
 

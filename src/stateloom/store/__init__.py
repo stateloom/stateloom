@@ -7,7 +7,7 @@ from stateloom.store.sqlite_store import SQLiteStore
 __all__ = ["MemoryStore", "SQLiteStore", "Store"]
 
 try:
-    from stateloom.store.postgres_store import PostgresStore
+    from stateloom.store.postgres_store import PostgresStore  # noqa: F401
 
     __all__.append("PostgresStore")
 except ImportError:

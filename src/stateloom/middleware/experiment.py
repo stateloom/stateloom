@@ -56,8 +56,17 @@ class ExperimentMiddleware:
         # Override model if variant specifies one
         model = variant_config.get("model")
         if model:
-            ctx.model = model
-            ctx.request_kwargs["model"] = model
+            if self._would_change_provider(model, ctx.provider):
+                logger.warning(
+                    "Experiment variant model '%s' targets a different provider than "
+                    "the original '%s' — skipping model override. Use consensus() for "
+                    "cross-provider comparison.",
+                    model,
+                    ctx.provider,
+                )
+            else:
+                ctx.model = model
+                ctx.request_kwargs["model"] = model
 
         # Merge request_overrides into request_kwargs
         request_overrides = variant_config.get("request_overrides", {})
@@ -106,8 +115,16 @@ class ExperimentMiddleware:
         # Agent model as base (variant model overrides)
         agent_model = agent_overrides.get("model")
         if agent_model and not variant_config.get("model"):
-            ctx.model = agent_model
-            ctx.request_kwargs["model"] = agent_model
+            if self._would_change_provider(agent_model, ctx.provider):
+                logger.warning(
+                    "Agent version model '%s' targets a different provider than "
+                    "the original '%s' — skipping model override.",
+                    agent_model,
+                    ctx.provider,
+                )
+            else:
+                ctx.model = agent_model
+                ctx.request_kwargs["model"] = agent_model
 
         # Agent request_overrides as base (variant overrides on top)
         agent_req_overrides = agent_overrides.get("request_overrides", {})
@@ -128,6 +145,24 @@ class ExperimentMiddleware:
             and "system_prompt" not in agent_req_overrides
         ):
             self._apply_system_prompt(ctx, agent_system_prompt)
+
+    @staticmethod
+    def _would_change_provider(new_model: str, current_provider: str) -> bool:
+        """Return True if *new_model* resolves to a different provider.
+
+        Uses ``_resolve_provider`` from ``stateloom.chat`` (lazy import to
+        avoid circular imports).  Returns ``False`` on any error so the
+        override proceeds (fail-open).
+        """
+        try:
+            from stateloom.chat import _resolve_provider
+
+            new_provider = _resolve_provider(new_model)
+            # Normalise to plain str for comparison (Provider enum extends str)
+            return str(new_provider) != str(current_provider)
+        except Exception:
+            logger.debug("Provider resolution failed for model %s", new_model, exc_info=True)
+            return False
 
     def _apply_system_prompt(self, ctx: MiddlewareContext, prompt: str) -> None:
         """Apply system prompt override in a provider-aware manner."""

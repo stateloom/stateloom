@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stateloom.core.types import Provider
+
+if TYPE_CHECKING:
+    from stateloom.middleware.base import StreamChunkInfo
 from stateloom.intercept.provider_adapter import BaseProviderAdapter, PatchTarget, TokenFieldMap
 
 _TOKEN_FIELDS = TokenFieldMap(
@@ -30,7 +33,7 @@ class GeminiAdapter(BaseProviderAdapter):
 
     def get_patch_targets(self) -> list[PatchTarget]:
         try:
-            from google.generativeai import GenerativeModel
+            from google.generativeai import GenerativeModel  # type: ignore[attr-defined]
         except ImportError:
             return []
 
@@ -49,8 +52,8 @@ class GeminiAdapter(BaseProviderAdapter):
             ),
         ]
 
-    def extract_model(self, instance: Any, args: tuple, kwargs: dict[str, Any]) -> str:
-        return getattr(instance, "model_name", None) or kwargs.get("model", "unknown")
+    def extract_model(self, instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+        return cast(str, getattr(instance, "model_name", None) or kwargs.get("model", "unknown"))
 
     def extract_tokens(self, response: Any) -> tuple[int, int, int]:
         return self._extract_tokens_from_fields(response, _TOKEN_FIELDS)
@@ -154,7 +157,7 @@ class GeminiAdapter(BaseProviderAdapter):
     def apply_system_prompt(self, kwargs: dict[str, Any], prompt: str) -> None:
         kwargs["system_instruction"] = prompt
 
-    def normalize_request(self, args: tuple, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def normalize_request(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
         """Move Gemini's positional `contents` arg into kwargs as `messages`."""
         result = dict(kwargs)
         # Gemini's generate_content(contents, ...) — contents is args[0]
@@ -176,6 +179,35 @@ class GeminiAdapter(BaseProviderAdapter):
                         messages.append({"role": role, "content": text})
                 result["messages"] = messages
         return result
+
+    def rebuild_call_args(
+        self,
+        normalized_kwargs: dict[str, Any],
+        original_args: tuple[Any, ...],
+        original_kwargs: dict[str, Any],
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """Rebuild Gemini's positional ``contents`` arg from modified messages."""
+        messages = normalized_kwargs.get("messages")
+        if messages is None or not original_args:
+            return original_args, original_kwargs
+
+        # Single-message string shorthand — keep it as a plain string
+        if (
+            len(messages) == 1
+            and isinstance(original_args[0], str)
+            and messages[0].get("role") == "user"
+        ):
+            return (messages[0].get("content", ""),), original_kwargs
+
+        # Multi-message or complex — rebuild as Content dicts
+        contents: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            if role == "system":
+                continue
+            gemini_role = "model" if role == "assistant" else "user"
+            contents.append({"role": gemini_role, "parts": [{"text": str(msg.get("content", ""))}]})
+        return (contents,), original_kwargs
 
     def extract_base_url(self, instance: Any) -> str:
         return "https://generativelanguage.googleapis.com"
@@ -239,7 +271,7 @@ class GeminiAdapter(BaseProviderAdapter):
 
         def llm_call() -> Any:
             try:
-                from google.generativeai import GenerativeModel
+                from google.generativeai import GenerativeModel  # type: ignore[attr-defined]
             except ImportError:
                 raise ImportError(
                     "google-generativeai package is required for Gemini models. "
@@ -251,7 +283,7 @@ class GeminiAdapter(BaseProviderAdapter):
             if keys.get("google"):
                 import google.generativeai as genai
 
-                genai.configure(api_key=keys["google"])
+                genai.configure(api_key=keys["google"])  # type: ignore[attr-defined]
 
             # Rebuild contents from messages at call time so middleware
             # modifications (e.g. PII redaction) are reflected.
@@ -280,8 +312,8 @@ class GeminiAdapter(BaseProviderAdapter):
                     generation_config=_gen_config or None,
                 )
             return gen_model.generate_content(
-                live_contents,
-                generation_config=_gen_config or None,
+                live_contents,  # type: ignore[arg-type]
+                generation_config=_gen_config or None,  # type: ignore[arg-type]
             )
 
         return request_kwargs, llm_call

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -79,8 +79,8 @@ class UpstreamStreamError(Exception):
             data = json.loads(self.content)
             # Gemini wraps errors in a JSON array
             if isinstance(data, list) and data:
-                return data[0]
-            return data
+                return cast(dict[str, Any], data[0])
+            return cast(dict[str, Any], data)
         except Exception:
             return {
                 "error": {
@@ -132,7 +132,8 @@ class PassthroughProxy:
         )
         logger.debug(
             "Forward response: %d %s (%s)",
-            response.status_code, upstream_url[:80],
+            response.status_code,
+            upstream_url[:80],
             response.headers.get("content-type", ""),
         )
         return response

@@ -75,6 +75,38 @@ class TestGuardrailsConfigureEndpoint:
         assert data["config"]["mode"] == "enforce"
         assert gate.config.guardrails_mode == GuardrailMode.ENFORCE
 
+    def test_toggle_enabled(self, client, gate):
+        """POST /security/guardrails/configure can toggle guardrails enabled."""
+        assert gate.config.guardrails_enabled is True
+
+        resp = client.post(
+            "/api/security/guardrails/configure",
+            json={"enabled": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["config"]["enabled"] is False
+        assert gate.config.guardrails_enabled is False
+
+    def test_toggle_local_model_enabled(self, client, gate):
+        """POST /security/guardrails/configure can toggle local model."""
+        resp = client.post(
+            "/api/security/guardrails/configure",
+            json={"local_model_enabled": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["config"]["local_model_enabled"] is True
+        assert gate.config.guardrails_local_model_enabled is True
+
+    def test_toggle_output_scanning(self, client, gate):
+        """POST /security/guardrails/configure can toggle output scanning."""
+        resp = client.post(
+            "/api/security/guardrails/configure",
+            json={"output_scanning_enabled": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["config"]["output_scanning_enabled"] is False
+        assert gate.config.guardrails_output_scanning_enabled is False
+
 
 class TestGuardrailsStatusEndpoint:
     def test_status_includes_nli_fields(self, client, gate):
@@ -84,3 +116,68 @@ class TestGuardrailsStatusEndpoint:
         data = response.json()
         assert "nli_enabled" in data["config"]
         assert "nli_available" in data["config"]
+
+    def test_nli_toggle_persists_across_config_reset(self, client, gate):
+        """NLI enabled via dashboard survives in-memory config reset."""
+        # Toggle NLI on via dashboard
+        resp = client.post(
+            "/api/security/guardrails/configure",
+            json={"nli_enabled": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["config"]["nli_enabled"] is True
+
+        # Simulate server restart: reset in-memory config to default
+        gate.config.guardrails_nli_enabled = False
+
+        # GET should load persisted value from store
+        resp = client.get("/api/security/guardrails")
+        assert resp.json()["config"]["nli_enabled"] is True
+
+    def test_disable_persists_across_refresh(self, client, gate):
+        """NLI disabled via dashboard stays disabled on refresh."""
+        # Enable NLI first
+        client.post(
+            "/api/security/guardrails/configure",
+            json={"nli_enabled": True},
+        )
+        # Disable NLI
+        resp = client.post(
+            "/api/security/guardrails/configure",
+            json={"nli_enabled": False},
+        )
+        assert resp.json()["config"]["nli_enabled"] is False
+
+        # Simulate page refresh — store has False, should stay False
+        resp = client.get("/api/security/guardrails")
+        assert resp.json()["config"]["nli_enabled"] is False
+
+    def test_toggle_on_off_cycle(self, client, gate):
+        """Full enable→disable→refresh cycle preserves each state."""
+        # Enable NLI
+        resp = client.post(
+            "/api/security/guardrails/configure",
+            json={"nli_enabled": True},
+        )
+        assert resp.json()["config"]["nli_enabled"] is True
+
+        # Simulate restart: reset in-memory config
+        gate.config.guardrails_nli_enabled = False
+
+        # GET reads from store — should still be True
+        resp = client.get("/api/security/guardrails")
+        assert resp.json()["config"]["nli_enabled"] is True
+
+        # Disable NLI
+        resp = client.post(
+            "/api/security/guardrails/configure",
+            json={"nli_enabled": False},
+        )
+        assert resp.json()["config"]["nli_enabled"] is False
+
+        # Simulate restart again: set in-memory to True (opposite of store)
+        gate.config.guardrails_nli_enabled = True
+
+        # GET reads from store — should be False (store wins)
+        resp = client.get("/api/security/guardrails")
+        assert resp.json()["config"]["nli_enabled"] is False

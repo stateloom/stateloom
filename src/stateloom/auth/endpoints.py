@@ -20,11 +20,9 @@ def create_auth_router(gate: Any) -> APIRouter:
     All endpoints are unauthenticated except logout, me, and change-password.
     """
     from stateloom.auth.jwt import (
-        _JWT_AVAILABLE,
         _get_jwt_secret,
         create_access_token,
         create_refresh_token,
-        decode_access_token,
         decode_refresh_token,
     )
     from stateloom.auth.models import User
@@ -305,7 +303,7 @@ def create_auth_router(gate: Any) -> APIRouter:
     # --- OIDC endpoints (enterprise-gated) ---
 
     # In-memory state storage for OIDC flows (state -> flow data)
-    _oidc_states: dict[str, dict] = {}
+    _oidc_states: dict[str, dict[str, Any]] = {}
 
     # Feature gate: OIDC requires enterprise license
     _oidc_deps: list[Any] = []
@@ -552,7 +550,7 @@ def create_auth_router(gate: Any) -> APIRouter:
             }
         )
 
-    async def _oidc_login(user: Any, provider: Any, claims: dict) -> JSONResponse:
+    async def _oidc_login(user: Any, provider: Any, claims: dict[str, Any]) -> JSONResponse:
         """Issue JWT tokens for an OIDC-authenticated user."""
         from stateloom.auth.oidc import OIDCClient
 
@@ -619,7 +617,7 @@ def create_auth_router(gate: Any) -> APIRouter:
 
     # --- Device authorization grant (CLI login) ---
 
-    _device_codes: dict[str, dict] = {}
+    _device_codes: dict[str, dict[str, Any]] = {}
 
     @router.post("/device/authorize")
     async def device_authorize(request: Request) -> JSONResponse:
@@ -742,7 +740,7 @@ def _ensure_default_org(gate: Any) -> str:
     """Ensure a 'Default Organization' exists. Returns its ID."""
     orgs = gate.store.list_organizations()
     if orgs:
-        return orgs[0].id
+        return str(orgs[0].id)
 
     from stateloom.core.organization import Organization
 

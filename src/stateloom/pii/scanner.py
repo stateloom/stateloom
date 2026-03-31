@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stateloom.core.config import StateLoomConfig
 from stateloom.pii.patterns import PII_PATTERNS, PIIPattern, luhn_check, resolve_pattern_names
@@ -115,7 +115,7 @@ class PIIScanner:
 
     def scan_messages(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         field_offset: int = 0,
     ) -> list[PIIMatch]:
         """Scan a list of chat messages for PII."""

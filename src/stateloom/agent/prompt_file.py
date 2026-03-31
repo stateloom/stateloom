@@ -94,7 +94,7 @@ def _parse_markdown(path: Path, default_model: str) -> PromptFileContent:
         body = text[end_idx + 4 :].strip()  # skip "\n---" + newline
 
         try:
-            import yaml
+            import yaml  # type: ignore[import-untyped]
 
             fm = yaml.safe_load(frontmatter_str)
         except Exception:

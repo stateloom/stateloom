@@ -6,7 +6,7 @@ import asyncio
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stateloom.core.errors import StateLoomRateLimitError
 from stateloom.middleware.rate_limiter import _QueuedRequest, _TokenBucket
@@ -159,9 +159,9 @@ class ProxyRateLimiter:
         with self._buckets_lock:
             self._buckets.pop(vk_id, None)
 
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """Return current state for all keys (dashboard use)."""
-        keys: dict[str, dict] = {}
+        keys: dict[str, dict[str, Any]] = {}
         with self._buckets_lock:
             for vk_id, bucket in self._buckets.items():
                 with bucket.lock:

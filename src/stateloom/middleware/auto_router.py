@@ -8,13 +8,13 @@ import re
 import threading
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, cast
 
 from stateloom.core.config import StateLoomConfig
 from stateloom.core.event import LocalRoutingEvent
 from stateloom.core.types import Provider
-from stateloom.local.client import OllamaClient, OllamaResponse
+from stateloom.local.client import OllamaClient
 from stateloom.middleware.base import MiddlewareContext
 from stateloom.middleware.response_converter import convert_response
 from stateloom.store.base import Store
@@ -215,7 +215,7 @@ class AutoRouterMiddleware:
         # Load historical stats from store
         self._load_historical_stats()
 
-    def _introspect_scorer(self, scorer: Callable) -> None:
+    def _introspect_scorer(self, scorer: Callable[..., Any]) -> None:
         """Determine whether the scorer expects a RoutingContext or plain str."""
         try:
             sig = inspect.signature(scorer)
@@ -363,27 +363,25 @@ class AutoRouterMiddleware:
 
     def _should_route_local(self, ctx: MiddlewareContext) -> RoutingDecision:
         """Determine whether this request should be routed to local."""
-        # Gate checks — any of these skip routing
-        if not ctx.auto_route_eligible:
-            return RoutingDecision(reason="not eligible (SDK direct call)")
-
-        if not self._config.auto_route.enabled:
-            return RoutingDecision(reason="auto_route disabled")
-
+        # Universal checks — apply even in force-local mode
         if ctx.provider == Provider.LOCAL:
             return RoutingDecision(reason="already local")
-
-        if ctx.is_streaming:
-            return RoutingDecision(reason="streaming not supported")
 
         if ctx.skip_call:
             return RoutingDecision(reason="skip_call set (cache hit)")
 
-        # Force-local mode: admin override, skip complexity analysis
+        # Force-local mode: admin override — applies to ALL call paths
+        # (SDK patched, proxy, stateloom.chat), skips complexity analysis
         if self._config.auto_route.force_local:
             kwargs = ctx.request_kwargs
-            if ctx.is_streaming:
-                return RoutingDecision(reason="force-local: streaming unsupported")
+            # Must have a local model configured
+            local_model = self._resolve_local_model(ctx)
+            if not local_model:
+                logger.warning(
+                    "[StateLoom] Force-local enabled but no local model configured — "
+                    "select a model in the dashboard (Active Local Model)"
+                )
+                return RoutingDecision(reason="force-local: no local model configured")
             if any(k in kwargs for k in ("tools", "functions", "tool_choice", "function_call")):
                 return RoutingDecision(reason="force-local: tools unsupported")
             if any(k in kwargs for k in ("response_format", "logprobs")):
@@ -392,12 +390,28 @@ class AutoRouterMiddleware:
                 return RoutingDecision(reason="force-local: images unsupported")
             if not self._check_ollama_available():
                 return RoutingDecision(reason="force-local: Ollama unavailable")
+            # Streaming: strip the flag — Ollama client uses non-streaming,
+            # response is returned as a complete object via ctx.cached_response
+            if ctx.is_streaming:
+                ctx.request_kwargs.pop("stream", None)
+                ctx.request_kwargs.pop("stream_options", None)
+                ctx.is_streaming = False
             return RoutingDecision(
                 route_local=True,
                 reason="force-local mode",
                 complexity_score=0.0,
                 budget_pressure=0.0,
             )
+
+        # Normal auto-route checks — only for eligible, non-streaming calls
+        if not ctx.auto_route_eligible:
+            return RoutingDecision(reason="not eligible (SDK direct call)")
+
+        if not self._config.auto_route.enabled:
+            return RoutingDecision(reason="auto_route disabled")
+
+        if ctx.is_streaming:
+            return RoutingDecision(reason="streaming not supported")
 
         # Session opt-out
         if ctx.session.metadata.get("auto_route_enabled") is False:
@@ -868,7 +882,7 @@ class AutoRouterMiddleware:
         # Session override
         session_model = ctx.session.metadata.get("auto_route_model", "")
         if session_model:
-            return session_model
+            return cast(str, session_model)
         # Config auto_route_model → local_model_default
         return self._config.auto_route.model or self._config.local_model_default
 
@@ -933,7 +947,7 @@ class AutoRouterMiddleware:
             return 0.0
         try:
             input_cost, output_cost = self._pricing.get_price(model)
-            return (prompt_tokens * input_cost) + (completion_tokens * output_cost)
+            return float((prompt_tokens * input_cost) + (completion_tokens * output_cost))
         except Exception:
             return 0.0
 

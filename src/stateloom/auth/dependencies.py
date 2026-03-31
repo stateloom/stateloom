@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
 from fastapi import Request
@@ -13,7 +14,10 @@ if TYPE_CHECKING:
     from stateloom.core.feature_registry import FeatureRegistry
 
 
-def require_feature(registry: FeatureRegistry, feature_name: str):
+def require_feature(
+    registry: FeatureRegistry,
+    feature_name: str,
+) -> Callable[..., Coroutine[Any, Any, None]]:
     """FastAPI dependency — returns 403 if the feature is not licensed.
 
     Args:
@@ -36,7 +40,10 @@ def require_feature(registry: FeatureRegistry, feature_name: str):
     return _check
 
 
-def require_permission(permission: Permission, team_id_param: str | None = None):
+def require_permission(
+    permission: Permission,
+    team_id_param: str | None = None,
+) -> Callable[..., Coroutine[Any, Any, Any]]:
     """FastAPI dependency that checks if the current user has a permission.
 
     Args:

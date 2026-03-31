@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field
 
-from stateloom.core.types import ActionTaken, EventType
+from stateloom.core.types import EventType
 
 
 def _utcnow() -> datetime:
@@ -75,6 +75,7 @@ class CacheHitEvent(Event):
     match_type: str = "exact"  # "exact" or "semantic"
     similarity_score: float | None = None  # cosine sim for semantic hits
     matched_hash: str = ""  # hash of matched entry (differs for semantic)
+    prompt_preview: str = ""
 
 
 class PIIDetectionEvent(Event):

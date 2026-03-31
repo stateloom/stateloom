@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stateloom.core.types import Provider
+
+if TYPE_CHECKING:
+    from stateloom.middleware.base import StreamChunkInfo
 from stateloom.intercept.provider_adapter import BaseProviderAdapter, PatchTarget, TokenFieldMap
 
 _TOKEN_FIELDS = TokenFieldMap(
@@ -59,7 +62,7 @@ class AnthropicAdapter(BaseProviderAdapter):
                     if getattr(block, "type", None) == "text":
                         return getattr(block, "text", "") or ""
                     if isinstance(block, dict) and block.get("type") == "text":
-                        return block.get("text", "")
+                        return str(block.get("text", ""))
                 # Fallback: grab .text from first block that has it
                 for block in response.content:
                     text = getattr(block, "text", None)
@@ -277,7 +280,7 @@ class AnthropicAdapter(BaseProviderAdapter):
             original = get_original(type(client.messages), "create")
             method = original or client.messages.create
             if original:
-                return method(client.messages, **request_kwargs)
+                return method(client.messages, **request_kwargs)  # type: ignore[call-overload]
             return method(**request_kwargs)
 
         return request_kwargs, llm_call

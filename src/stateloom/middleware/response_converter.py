@@ -151,7 +151,7 @@ class _GeminiResponseProxy:
         return self._content
 
     @property
-    def candidates(self) -> list:
+    def candidates(self) -> list[Any]:
         return [_GeminiCandidate(self._content)]
 
     @property

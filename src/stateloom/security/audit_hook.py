@@ -88,7 +88,7 @@ class AuditHookManager:
         self._installed = True
         return True
 
-    def _hook(self, event: str, args: tuple) -> None:
+    def _hook(self, event: str, args: tuple[Any, ...]) -> None:
         """The actual audit hook callback invoked by CPython."""
         if not self._enabled:
             return
@@ -172,7 +172,7 @@ class AuditHookManager:
             }
 
 
-def _extract_detail(event: str, args: tuple) -> str:
+def _extract_detail(event: str, args: tuple[Any, ...]) -> str:
     """Extract a human-readable detail string from audit hook args."""
     try:
         if event == "open" and args:

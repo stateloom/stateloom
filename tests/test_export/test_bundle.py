@@ -870,6 +870,44 @@ class TestEdgeCases:
         events = store2.get_session_events("sess-001", limit=10000)
         assert len(events) == 100
 
+    def test_import_with_override_does_not_overwrite_original_events(self):
+        """Importing with session_id_override must not delete original events.
+
+        This was a real bug: import preserved event UUIDs, so INSERT OR REPLACE
+        on the same PK overwrote the original events with imported copies that
+        had a different session_id.
+        """
+        store = MemoryStore()
+
+        # Create original session with events
+        session = _make_session("original-sess")
+        store.save_session(session)
+        e1 = _make_llm_event("original-sess", step=1, model="gpt-4o")
+        e2 = _make_tool_event("original-sess", step=2)
+        store.save_event(e1)
+        store.save_event(e2)
+        original_ids = {e1.id, e2.id}
+
+        # Export the session
+        bundle = export_session(store, "original-sess")
+        assert len(bundle["events"]) == 2
+
+        # Import with a new session ID
+        import_session(store, bundle, session_id_override="imported-sess")
+
+        # Original events must still be there
+        original_events = store.get_session_events("original-sess")
+        assert len(original_events) == 2
+        assert {e.id for e in original_events} == original_ids
+
+        # Imported events must have NEW UUIDs
+        imported_events = store.get_session_events("imported-sess")
+        assert len(imported_events) == 2
+        imported_ids = {e.id for e in imported_events}
+        assert imported_ids.isdisjoint(original_ids), (
+            "Imported events should have new UUIDs, not reuse originals"
+        )
+
     def test_import_preserves_event_discriminator(self):
         """AnyEvent discriminated union correctly picks subclass."""
         store = MemoryStore()

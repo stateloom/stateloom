@@ -6,6 +6,8 @@ variant model/param overrides, and dashboard API verification.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from tests.test_production.helpers import invoke_pipeline, make_openai_response
@@ -261,3 +263,142 @@ def test_experiment_dashboard_api(e2e_gate, api_client):
     # Get metrics
     metrics_resp = client.get(f"/experiments/{exp.id}/metrics").json()
     assert "variants" in metrics_resp
+
+
+def test_experiment_cross_provider_model_override_skipped(e2e_gate, caplog):
+    """Variant model targeting a different provider → model override skipped."""
+    gate = e2e_gate(cache=False)
+
+    exp = gate.experiment_manager.create_experiment(
+        name="cross-provider-exp",
+        variants=[
+            # Variant targets Gemini but original call is OpenAI
+            {"name": "gemini_variant", "weight": 100, "model": "gemini-2.5-flash"},
+        ],
+    )
+    gate.experiment_manager.start_experiment(exp.id)
+
+    response = make_openai_response("OpenAI answer", model="gpt-3.5-turbo")
+
+    with gate.session(
+        session_id="cross-provider-test-1",
+        experiment=exp.id,
+        variant="gemini_variant",
+    ) as session:
+        with caplog.at_level(logging.WARNING, logger="stateloom.experiment"):
+            result = invoke_pipeline(
+                gate,
+                session,
+                {"messages": [{"role": "user", "content": "Hi"}]},
+                llm_call=lambda: response,
+                model="gpt-3.5-turbo",
+                provider="openai",
+            )
+
+    # Model override was skipped — ctx.model stayed as the original
+    assert result is response
+    assert "skipping model override" in caplog.text
+
+
+def test_experiment_same_provider_model_override_works(e2e_gate):
+    """Variant model targeting the same provider → model override applied."""
+    gate = e2e_gate(cache=False)
+
+    exp = gate.experiment_manager.create_experiment(
+        name="same-provider-exp",
+        variants=[
+            {"name": "gpt4_variant", "weight": 100, "model": "gpt-4o"},
+        ],
+    )
+    gate.experiment_manager.start_experiment(exp.id)
+
+    response = make_openai_response("GPT-4o answer", model="gpt-4o")
+    captured_model = {}
+
+    def capturing_llm_call():
+        return response
+
+    with gate.session(
+        session_id="same-provider-test-1",
+        experiment=exp.id,
+        variant="gpt4_variant",
+    ) as session:
+        result = invoke_pipeline(
+            gate,
+            session,
+            {"messages": [{"role": "user", "content": "Hi"}]},
+            llm_call=capturing_llm_call,
+            model="gpt-3.5-turbo",
+            provider="openai",
+        )
+
+    assert result is response
+
+
+def test_experiment_cross_provider_still_applies_overrides(e2e_gate, caplog):
+    """Cross-provider model skip still applies system_prompt and request_overrides."""
+    gate = e2e_gate(cache=False)
+
+    exp = gate.experiment_manager.create_experiment(
+        name="cross-provider-overrides-exp",
+        variants=[
+            {
+                "name": "cross_variant",
+                "weight": 100,
+                "model": "claude-3-opus",  # Anthropic model on OpenAI call
+                "request_overrides": {
+                    "system_prompt": "You are a test bot.",
+                    "temperature": 0.1,
+                },
+            },
+        ],
+    )
+    gate.experiment_manager.start_experiment(exp.id)
+
+    response = make_openai_response("Answer")
+    captured_kwargs = {}
+
+    original_execute = gate.pipeline.execute_sync
+
+    def spy_execute(**kwargs):
+        # Intercept to inspect the context after middleware
+        return original_execute(**kwargs)
+
+    with gate.session(
+        session_id="cross-provider-overrides-1",
+        experiment=exp.id,
+        variant="cross_variant",
+    ) as session:
+        with caplog.at_level(logging.WARNING, logger="stateloom.experiment"):
+            session.next_step()
+            # Build ctx manually to inspect it after middleware
+            from stateloom.middleware.base import MiddlewareContext
+
+            request_kwargs = {
+                "messages": [{"role": "user", "content": "Hi"}],
+                "model": "gpt-3.5-turbo",
+            }
+            ctx = MiddlewareContext(
+                session=session,
+                config=gate.config,
+                provider="openai",
+                method="chat.completions.create",
+                model="gpt-3.5-turbo",
+                request_kwargs=request_kwargs,
+                request_hash="test",
+            )
+
+            # Apply experiment middleware directly
+            from stateloom.middleware.experiment import ExperimentMiddleware
+
+            mw = ExperimentMiddleware(store=gate.store)
+            mw._apply_overrides(ctx)
+
+    # Model was NOT changed (cross-provider)
+    assert ctx.model == "gpt-3.5-turbo"
+    assert "skipping model override" in caplog.text
+
+    # But system_prompt and temperature WERE applied
+    assert ctx.request_kwargs.get("temperature") == 0.1
+    messages = ctx.request_kwargs.get("messages", [])
+    assert any(m.get("role") == "system" and "test bot" in m.get("content", "") for m in messages)

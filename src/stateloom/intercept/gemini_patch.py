@@ -8,11 +8,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stateloom.core.context import get_current_replay_engine
 from stateloom.core.types import Provider
-from stateloom.intercept.unpatch import register_patch
 
 if TYPE_CHECKING:
     from stateloom.gate import Gate
@@ -37,7 +36,7 @@ def _extract_model(instance: Any, kwargs: dict[str, Any]) -> str:
     Gemini stores the model name on the instance (instance.model_name),
     unlike OpenAI/Anthropic which pass it in kwargs.
     """
-    return getattr(instance, "model_name", None) or kwargs.get("model", "unknown")
+    return cast(str, getattr(instance, "model_name", None) or kwargs.get("model", "unknown"))
 
 
 def _extract_tokens_from_response(response: Any) -> tuple[int, int, int]:
@@ -67,7 +66,7 @@ def _check_replay(gate: Gate, step: int) -> Any | None:
 
 
 def _intercept_sync(
-    gate: Gate, original: Any, instance: Any, args: tuple, kwargs: dict[str, Any]
+    gate: Gate, original: Any, instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Any:
     """Intercept a sync Gemini call through the middleware pipeline."""
     model = _extract_model(instance, kwargs)
@@ -114,7 +113,7 @@ def _intercept_sync(
 
 
 async def _intercept_async(
-    gate: Gate, original: Any, instance: Any, args: tuple, kwargs: dict[str, Any]
+    gate: Gate, original: Any, instance: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Any:
     """Intercept an async Gemini call through the middleware pipeline."""
     model = _extract_model(instance, kwargs)
@@ -161,7 +160,7 @@ async def _intercept_async(
 
 
 def _wrap_stream_sync(
-    gate: Gate, stream: Any, session: Any, model: str, step: int, kwargs: dict
+    gate: Gate, stream: Any, session: Any, model: str, step: int, kwargs: dict[str, Any]
 ) -> Any:
     """Wrap a sync Gemini streaming response to capture tokens on completion.
 
@@ -205,7 +204,7 @@ def _wrap_stream_sync(
 
 
 async def _wrap_stream_async(
-    gate: Gate, stream: Any, session: Any, model: str, step: int, kwargs: dict
+    gate: Gate, stream: Any, session: Any, model: str, step: int, kwargs: dict[str, Any]
 ) -> Any:
     """Wrap an async Gemini streaming response to capture tokens on completion.
 

@@ -24,12 +24,12 @@ def store():
 
 @pytest.fixture
 def agent_version(store):
-    """A saved agent version for testing."""
+    """A saved agent version for testing (same provider as default ctx: openai)."""
     version = AgentVersion(
         id="agv-test123",
         agent_id="agt-test456",
         version_number=1,
-        model="claude-sonnet-4-20250514",
+        model="gpt-4o-mini",
         system_prompt="You are a helpful support agent.",
         request_overrides={"temperature": 0.3, "max_tokens": 1024},
     )
@@ -127,8 +127,8 @@ class TestMiddlewareAgentResolution:
             }
         )
         asyncio.run(middleware.process(ctx, _passthrough))
-        assert ctx.model == "claude-sonnet-4-20250514"
-        assert ctx.request_kwargs["model"] == "claude-sonnet-4-20250514"
+        assert ctx.model == "gpt-4o-mini"
+        assert ctx.request_kwargs["model"] == "gpt-4o-mini"
 
     def test_variant_model_overrides_agent(self, store, agent_version):
         """Variant's explicit model takes precedence over agent version model."""
@@ -298,7 +298,7 @@ class TestAssignmentSnapshot:
         assert assignment is not None
         config = assignment.variant_config
         assert "_resolved_agent_overrides" in config
-        assert config["_resolved_agent_overrides"]["model"] == "claude-sonnet-4-20250514"
+        assert config["_resolved_agent_overrides"]["model"] == "gpt-4o-mini"
         assert config["_resolved_agent_overrides"]["system_prompt"] == "You are a helpful support agent."
         assert config["_resolved_agent_overrides"]["request_overrides"]["temperature"] == 0.3
 

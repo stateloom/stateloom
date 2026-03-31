@@ -13,11 +13,12 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any
+from typing import Any, cast
 
 from stateloom._version import __version__
 from stateloom.agent.models import Agent, AgentVersion
 from stateloom.chat import ChatResponse, Client, achat, chat
+from stateloom.consensus.models import ConsensusResult, DebateRound
 from stateloom.core.config import ComplianceProfile, KillSwitchRule, PIIRule, StateLoomConfig
 from stateloom.core.errors import (
     StateLoomAuthError,
@@ -46,7 +47,6 @@ from stateloom.core.errors import (
 )
 from stateloom.core.organization import Organization, Team
 from stateloom.core.session import Session
-from stateloom.consensus.models import ConsensusResult, DebateRound
 from stateloom.core.types import (
     AgentStatus,
     ComplianceStandard,
@@ -102,25 +102,6 @@ def register_provider(
             _deferred_pricing.update(pricing)
 
 
-def _detect_ollama_model() -> str | None:
-    """Probe Ollama and return the largest available model name, or None."""
-    try:
-        from stateloom.local.client import OllamaClient
-
-        client = OllamaClient()
-        if not client.is_available():
-            return None
-        models = client.list_models()
-        client.close()
-        if not models:
-            return None
-        # Pick the largest downloaded model (most capable)
-        best = max(models, key=lambda m: m.get("size", 0))
-        return best.get("name", "") or None
-    except Exception:
-        return None
-
-
 _UNSET = object()
 
 
@@ -131,13 +112,15 @@ def init(
     budget: float | None = None,
     budget_on_middleware_failure: str | FailureAction | None = None,
     pii: bool = False,
-    pii_rules: list[PIIRule | dict] | None = None,
+    pii_rules: list[PIIRule | dict[str, Any]] | None = None,
     dashboard: bool = True,
-    dashboard_port: int = 4781,
+    dashboard_port: int = 4782,
     console_output: bool = True,
     fail_open: bool = True,
     store_backend: str = "sqlite",
     cache: bool = True,
+    loop_detection: bool = False,
+    loop_threshold: int | None = None,
     cache_backend: str | None = None,
     cache_scope: str | None = None,
     cache_semantic: bool | None = None,
@@ -163,6 +146,7 @@ def init(
     proxy: bool = False,
     proxy_require_virtual_key: bool = True,
     prompts_dir: str = "",
+    compliance: str | None = None,
     security_audit_hooks_enabled: bool = False,
     security_secret_vault_enabled: bool = False,
     durable_stream_delay_ms: float = 0,
@@ -179,13 +163,17 @@ def init(
         budget: Default per-session budget in USD. None = unlimited.
         budget_on_middleware_failure: What to do when budget middleware fails ('block'/'pass').
         pii: Enable PII detection (audit mode by default).
-        pii_rules: List of PIIRule configs with per-rule on_middleware_failure.
+        pii_rules: List of PIIRule configs. When provided, these take precedence
+            over any PII rules persisted via the dashboard API. When omitted,
+            dashboard/API-configured rules apply (cross-process sync).
         dashboard: Start the local dashboard at localhost:{dashboard_port}.
         dashboard_port: Port for the dashboard server.
         console_output: Print one-liner for every LLM call.
         fail_open: If True, observability middleware errors never break LLM calls.
         store_backend: "sqlite" (default) or "memory".
         cache: Enable request caching.
+        loop_detection: Enable loop detection (blocks repeated identical requests).
+        loop_threshold: Number of identical requests before blocking (default 5).
         cache_backend: Cache storage backend — "memory" (default), "sqlite", or "redis".
         cache_scope: Cache scope — "global" (cross-session, default) or "session".
         cache_semantic: Enable semantic similarity matching
@@ -221,6 +209,8 @@ def init(
             Requires dashboard=True.
         proxy_require_virtual_key: If True, proxy requests must provide a valid
             virtual API key. Set to False for development/testing.
+        compliance: Global compliance profile preset name ("gdpr", "hipaa", "ccpa")
+            or None. Applies to all sessions unless overridden by org/team profiles.
         **kwargs: Additional config overrides.
 
     Returns:
@@ -229,8 +219,8 @@ def init(
     global _gate
 
     if _gate is not None:
-        logger.warning("Already initialized. Call stateloom.shutdown() first.")
-        return _gate
+        logger.info("Re-initializing StateLoom with new config.")
+        shutdown()
 
     # Convert pii_rules dicts to PIIRule objects
     resolved_pii_rules: list[PIIRule] = []
@@ -249,22 +239,15 @@ def init(
         else:
             resolved_budget_failure = budget_on_middleware_failure
 
-    # Auto-detect local model if not explicitly provided
-    # _UNSET = user didn't pass the arg → try auto-detection
-    # None   = user explicitly said "no local model"
-    # str    = user explicitly chose a model
-    if local_model is _UNSET:
-        detected_local_model = _detect_ollama_model()
-        if detected_local_model:
-            logger.info(
-                "Ollama detected with model '%s' — auto-enabling local model & shadow",
-                detected_local_model,
-            )
+    # Local model is opt-in only — user must explicitly pass a model name.
+    # _UNSET / None = no local model, str = user explicitly chose a model.
+    if local_model is _UNSET or local_model is None:
+        detected_local_model = None
     else:
-        detected_local_model = local_model  # None or a string
+        detected_local_model = local_model
 
-    # Resolve shadow: _UNSET means "auto" (enable if a local model is available)
-    # Explicit True/False from the user is respected as-is
+    # Shadow is opt-in only — enabled when user passes shadow=True or
+    # when a local_model is explicitly provided.
     if shadow is _UNSET:
         shadow = bool(detected_local_model)
     shadow = bool(shadow)
@@ -283,6 +266,7 @@ def init(
         "fail_open": fail_open,
         "store_backend": store_backend,
         "cache_enabled": cache,
+        "loop_detection_enabled": loop_detection,
         "metrics_enabled": metrics_enabled,
         "durable_stream_delay_ms": durable_stream_delay_ms,
         "debug": debug,
@@ -305,6 +289,10 @@ def init(
     if cache_normalize_patterns is not None:
         config_kwargs["cache_normalize_patterns"] = cache_normalize_patterns
 
+    # Loop detection config
+    if loop_threshold is not None:
+        config_kwargs["loop_exact_threshold"] = loop_threshold
+
     # Local model config
     if detected_local_model:
         config_kwargs["local_model_enabled"] = True
@@ -315,8 +303,8 @@ def init(
     if shadow_similarity is not None:
         config_kwargs["shadow_similarity_method"] = shadow_similarity
 
-    # Auto-routing: auto-enable when local_model is set unless explicitly disabled
-    auto_route_enabled = auto_route if auto_route is not None else bool(detected_local_model)
+    # Auto-routing: opt-in only — must explicitly pass auto_route=True
+    auto_route_enabled = auto_route if auto_route is not None else False
     if auto_route_enabled:
         config_kwargs["auto_route_enabled"] = True
         if auto_route_model:
@@ -356,6 +344,12 @@ def init(
     # Prompt file watcher
     if prompts_dir:
         config_kwargs["prompts_dir"] = prompts_dir
+
+    # Compliance profile
+    if compliance is not None:
+        from stateloom.compliance.profiles import resolve_profile
+
+        config_kwargs["compliance_profile"] = resolve_profile(compliance)
 
     # Security engine
     if security_audit_hooks_enabled:
@@ -504,7 +498,7 @@ def tool(
     mutates_state: bool = False,
     name: str | None = None,
     session_root: bool = False,
-):
+) -> Any:
     """Decorator for tool functions (sync and async).
 
     Enables tool execution visibility, safe replay, and loop detection.
@@ -542,20 +536,24 @@ def _replay_session(
     mock_until_step: int,
     strict: bool = True,
     allow_hosts: list[str] | None = None,
-) -> None:
+) -> Any:
     """Time-travel debugging: replay a session, mocking steps up to mock_until_step.
+
+    Returns the ``ReplayEngine`` (also a context manager). Call
+    ``engine.stop()`` to clean up, or use as a context manager::
+
+        with stateloom.replay(session="ticket-123", mock_until_step=13) as engine:
+            # steps 1-13 return cached responses, 14+ execute live
+            run_pipeline()
 
     Args:
         session: The session ID to replay.
         mock_until_step: Mock steps 1 through N with cached responses.
         strict: If True, block outbound HTTP calls not captured via @gate.tool().
         allow_hosts: Hosts to allow through the network blocker in strict mode.
-
-    Usage:
-        stateloom.replay(session="ticket-123", mock_until_step=13, strict=True)
     """
     gate = get_gate()
-    gate.replay(
+    return gate.replay(
         session=session,
         mock_until_step=mock_until_step,
         strict=strict,
@@ -690,10 +688,12 @@ def create_experiment(
     Returns:
         The Experiment object.
     """
+    from stateloom.experiment.models import VariantConfig
+
     gate = get_gate()
     return gate.experiment_manager.create_experiment(
         name=name,
-        variants=variants,
+        variants=cast(list[dict[str, Any] | VariantConfig], variants),
         strategy=strategy,
         description=description,
         metadata=metadata,
@@ -713,7 +713,7 @@ def pause_experiment(experiment_id: str) -> Any:
     return gate.experiment_manager.pause_experiment(experiment_id)
 
 
-def conclude_experiment(experiment_id: str) -> dict:
+def conclude_experiment(experiment_id: str) -> dict[str, Any]:
     """Conclude an experiment and return final metrics."""
     gate = get_gate()
     return gate.experiment_manager.conclude_experiment(experiment_id)
@@ -746,12 +746,14 @@ def update_experiment(
     Raises:
         ValueError: If experiment not found or not in DRAFT status.
     """
+    from stateloom.experiment.models import VariantConfig
+
     gate = get_gate()
     return gate.experiment_manager.update_experiment(
         experiment_id,
         name=name,
         description=description,
-        variants=variants,
+        variants=cast(list[dict[str, Any] | VariantConfig] | None, variants),
         strategy=strategy,
         metadata=metadata,
         agent_id=agent_id,
@@ -770,13 +772,13 @@ def feedback(
     gate.feedback(session_id=session_id, rating=rating, score=score, comment=comment)
 
 
-def experiment_metrics(experiment_id: str) -> dict:
+def experiment_metrics(experiment_id: str) -> dict[str, Any]:
     """Get per-variant aggregated metrics for an experiment."""
     gate = get_gate()
     return gate.experiment_manager.get_metrics(experiment_id)
 
 
-def leaderboard() -> list[dict]:
+def leaderboard() -> list[dict[str, Any]]:
     """Get cross-experiment variant ranking sorted by success_rate desc, avg_cost asc."""
     gate = get_gate()
     return gate.experiment_manager.get_leaderboard()
@@ -790,7 +792,7 @@ def backtest(
     mock_until_step: int | None = None,
     strict: bool = False,
     evaluator: Any = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Run backtest: replay sessions with different variant configs.
 
     Args:
@@ -811,12 +813,13 @@ def backtest(
         List of result dicts with metrics per (session, variant) pair.
     """
     from stateloom.experiment.backtest import BacktestRunner
+    from stateloom.experiment.models import VariantConfig
 
     gate = get_gate()
     runner = BacktestRunner(gate, experiment_manager=gate.experiment_manager)
     results = runner.run_backtest(
         source_session_ids=sessions,
-        variants=variants,
+        variants=cast(list[dict[str, Any] | VariantConfig], variants),
         agent_fn=agent_fn,
         mock_until_step=mock_until_step,
         strict=strict,
@@ -845,7 +848,7 @@ def pull_model(model: str, *, progress: Any = None) -> None:
         client.close()
 
 
-def list_local_models() -> list[dict]:
+def list_local_models() -> list[dict[str, Any]]:
     """List locally downloaded Ollama models."""
     from stateloom.local.client import OllamaClient
 
@@ -857,7 +860,7 @@ def list_local_models() -> list[dict]:
         client.close()
 
 
-def recommend_models() -> list[dict]:
+def recommend_models() -> list[dict[str, Any]]:
     """Get hardware-aware model recommendations for local inference."""
     from stateloom.local.hardware import detect_hardware
     from stateloom.local.hardware import recommend_models as _recommend
@@ -935,7 +938,7 @@ def set_local_model(model: str) -> None:
     gate.config.shadow_model = model
 
 
-def set_auto_route_scorer(scorer: Callable | None) -> None:
+def set_auto_route_scorer(scorer: Callable[..., Any] | None) -> None:
     """Set or clear a custom routing scorer for auto-routing decisions.
 
     Simple:  def my_scorer(prompt: str) -> bool | float | None
@@ -961,7 +964,7 @@ def kill_switch(active: bool = True, *, message: str | None = None) -> None:
         gate.config.kill_switch_message = message
 
 
-def kill_switch_rules() -> list[dict]:
+def kill_switch_rules() -> list[dict[str, Any]]:
     """Get the current kill switch rules as a list of dicts."""
     gate = get_gate()
     return [r.model_dump() for r in gate.config.kill_switch_rules]
@@ -996,7 +999,7 @@ def clear_kill_switch_rules() -> None:
     gate.config.kill_switch_rules.clear()
 
 
-def blast_radius_status() -> dict:
+def blast_radius_status() -> dict[str, Any]:
     """Get blast radius containment status (paused sessions/agents, counts)."""
     gate = get_gate()
     if gate._blast_radius is None:
@@ -1009,12 +1012,12 @@ def blast_radius_status() -> dict:
             "session_budget_violations": {},
             "agent_budget_violations": {},
         }
-    status = gate._blast_radius.get_status()
+    status: dict[str, Any] = gate._blast_radius.get_status()
     status["enabled"] = True
     return status
 
 
-def guardrails_status() -> dict:
+def guardrails_status() -> dict[str, Any]:
     """Get guardrails middleware status."""
     gate = get_gate()
     if gate._guardrails is None:
@@ -1047,7 +1050,7 @@ def configure_guardrails(
     nli_threshold: float | None = None,
     heuristic_enabled: bool | None = None,
     mode: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Configure guardrails at runtime (hot-reload, no restart needed).
 
     Args:
@@ -1067,13 +1070,13 @@ def configure_guardrails(
     if heuristic_enabled is not None:
         gate.config.guardrails_heuristic_enabled = bool(heuristic_enabled)
     if mode is not None:
-        from stateloom.core.types import GuardrailMode as _GM
+        from stateloom.core.types import GuardrailMode
 
-        gate.config.guardrails_mode = _GM(mode)
+        gate.config.guardrails_mode = GuardrailMode(mode)
     return guardrails_status()
 
 
-def shadow_status() -> dict:
+def shadow_status() -> dict[str, Any]:
     """Get model testing (shadow drafting) status."""
     gate = get_gate()
     return gate.shadow_status()
@@ -1086,7 +1089,7 @@ def configure_shadow(
     sample_rate: float | None = None,
     max_context_tokens: int | None = None,
     models: list[str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Configure model testing (shadow drafting) at runtime. Enterprise-gated."""
     gate = get_gate()
     return gate.configure_shadow(
@@ -1103,7 +1106,7 @@ def unpause_session(session_id: str) -> bool:
     gate = get_gate()
     if gate._blast_radius is None:
         return False
-    return gate._blast_radius.unpause_session(session_id)
+    return cast(bool, gate._blast_radius.unpause_session(session_id))
 
 
 def unpause_agent(agent_id: str) -> bool:
@@ -1111,7 +1114,7 @@ def unpause_agent(agent_id: str) -> bool:
     gate = get_gate()
     if gate._blast_radius is None:
         return False
-    return gate._blast_radius.unpause_agent(agent_id)
+    return cast(bool, gate._blast_radius.unpause_agent(agent_id))
 
 
 # --- Organization & Team API ---
@@ -1121,7 +1124,7 @@ def create_organization(
     name: str = "",
     *,
     budget: float | None = None,
-    pii_rules: list[PIIRule | dict] | None = None,
+    pii_rules: list[PIIRule | dict[str, Any]] | None = None,
     compliance_profile: ComplianceProfile | str | None = None,
     **kwargs: Any,
 ) -> Organization:
@@ -1202,13 +1205,13 @@ def list_teams(org_id: str | None = None) -> list[Team]:
     return gate.list_teams(org_id=org_id)
 
 
-def org_stats(org_id: str) -> dict:
+def org_stats(org_id: str) -> dict[str, Any]:
     """Get aggregated stats for an organization."""
     gate = get_gate()
     return gate.store.get_org_stats(org_id)
 
 
-def team_stats(team_id: str) -> dict:
+def team_stats(team_id: str) -> dict[str, Any]:
     """Get aggregated stats for a team."""
     gate = get_gate()
     return gate.store.get_team_stats(team_id)
@@ -1219,7 +1222,7 @@ def team_stats(team_id: str) -> dict:
 
 def create_agent(
     slug: str,
-    team_id: str,
+    team_id: str = "",
     *,
     name: str = "",
     model: str = "",
@@ -1234,7 +1237,7 @@ def create_agent(
 
     Args:
         slug: URL-friendly identifier (3-64 chars, lowercase alphanumeric + hyphens).
-        team_id: Team that owns this agent.
+        team_id: Team that owns this agent (optional).
         name: Human-readable name.
         model: Model for the initial version (e.g. "gpt-4o").
         system_prompt: System prompt for the initial version.
@@ -1271,7 +1274,7 @@ def get_agent(agent_id: str) -> Any:
 def list_agents(
     team_id: str | None = None,
     org_id: str | None = None,
-) -> list:
+) -> list[Any]:
     """List agents, optionally filtered by team_id or org_id."""
     gate = get_gate()
     return gate.list_agents(team_id=team_id, org_id=org_id)
@@ -1313,6 +1316,19 @@ def create_agent_version(
     )
 
 
+def list_agent_versions(agent_id: str) -> list[Any]:
+    """List all versions for an agent, ordered by version number.
+
+    Args:
+        agent_id: The agent ID.
+
+    Returns:
+        List of AgentVersion objects.
+    """
+    gate = get_gate()
+    return gate.store.list_agent_versions(agent_id)
+
+
 def activate_agent_version(agent_id: str, version_id: str) -> Any:
     """Activate a specific version for an agent (rollback).
 
@@ -1327,7 +1343,7 @@ def activate_agent_version(agent_id: str, version_id: str) -> Any:
     return gate.activate_agent_version(agent_id, version_id)
 
 
-def purge_user_data(user_identifier: str, standard: str = "gdpr") -> dict:
+def purge_user_data(user_identifier: str, standard: str = "gdpr") -> dict[str, Any]:
     """Purge all data matching a user identifier (Right to Be Forgotten).
 
     Args:
@@ -1528,19 +1544,29 @@ def consensus_sync(
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
-        consensus(
-            prompt=prompt,
-            models=models,
-            rounds=rounds,
-            strategy=strategy,
-            budget=budget,
-            session_id=session_id,
-            greedy=greedy,
-            agent=agent,
-            **kwargs,
-        )
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    coro = consensus(
+        prompt=prompt,
+        models=models,
+        rounds=rounds,
+        strategy=strategy,
+        budget=budget,
+        session_id=session_id,
+        greedy=greedy,
+        agent=agent,
+        **kwargs,
     )
+
+    if loop and loop.is_running():
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    return asyncio.run(coro)
 
 
 def cancel_session(session_id: str) -> bool:
@@ -1636,7 +1662,7 @@ async def async_suspend(
     return await gate.async_suspend(reason=reason, data=data, timeout=timeout)
 
 
-def circuit_breaker_status() -> dict:
+def circuit_breaker_status() -> dict[str, Any]:
     """Get circuit breaker status for all tracked providers."""
     gate = get_gate()
     return gate.circuit_breaker_status()
@@ -1655,12 +1681,12 @@ def reset_circuit_breaker(provider: str) -> bool:
     return gate.reset_circuit_breaker(provider)
 
 
-def rate_limiter_status() -> dict:
+def rate_limiter_status() -> dict[str, Any]:
     """Get rate limiter status (per-team queue depths, token counts)."""
     gate = get_gate()
     if gate._rate_limiter is None:
         return {"teams": {}}
-    return gate._rate_limiter.get_status()
+    return cast(dict[str, Any], gate._rate_limiter.get_status())
 
 
 # --- Async Jobs API ---
@@ -1719,7 +1745,7 @@ def list_jobs(
     session_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
-) -> list:
+) -> list[Any]:
     """List jobs, optionally filtered by status or session_id."""
     gate = get_gate()
     return gate.list_jobs(
@@ -1736,7 +1762,7 @@ def cancel_job(job_id: str) -> bool:
     return gate.cancel_job(job_id)
 
 
-def job_stats() -> dict:
+def job_stats() -> dict[str, Any]:
     """Get aggregate job statistics."""
     gate = get_gate()
     return gate.job_stats()
@@ -1851,7 +1877,7 @@ def revoke_virtual_key(key_id: str) -> bool:
     return gate.store.revoke_virtual_key(key_id)
 
 
-def lock_setting(setting: str, value: Any = None, *, reason: str = "") -> dict:
+def lock_setting(setting: str, value: Any = None, *, reason: str = "") -> dict[str, Any]:
     """Lock a config setting (admin only).
 
     Args:
@@ -1877,7 +1903,7 @@ def unlock_setting(setting: str) -> bool:
     return get_gate().unlock_setting(setting)
 
 
-def list_locked_settings() -> list[dict]:
+def list_locked_settings() -> list[dict[str, Any]]:
     """List all admin-locked settings."""
     return get_gate().list_locked_settings()
 
@@ -1891,7 +1917,7 @@ def prompt_watcher_status() -> dict[str, Any]:
     gate = get_gate()
     if gate._prompt_watcher is None:
         return {"enabled": False}
-    return gate._prompt_watcher.get_status()
+    return cast(dict[str, Any], gate._prompt_watcher.get_status())
 
 
 def rescan_prompts() -> dict[str, Any]:
@@ -1904,10 +1930,10 @@ def rescan_prompts() -> dict[str, Any]:
     if gate._prompt_watcher is None:
         return {"enabled": False}
     gate._prompt_watcher.scan()
-    return gate._prompt_watcher.get_status()
+    return cast(dict[str, Any], gate._prompt_watcher.get_status())
 
 
-def security_status() -> dict:
+def security_status() -> dict[str, Any]:
     """Get security engine status (audit hooks + secret vault)."""
     gate = get_gate()
     return gate.security_status()
@@ -1929,10 +1955,10 @@ def vault_retrieve(name: str) -> str | None:
     gate = get_gate()
     if gate._secret_vault is None:
         return None
-    return gate._secret_vault.retrieve(name)
+    return cast(str | None, gate._secret_vault.retrieve(name))
 
 
-def server_logs(limit: int = 200, level: str | None = None) -> list[dict]:
+def server_logs(limit: int = 200, level: str | None = None) -> list[dict[str, Any]]:
     """Get recent server logs (debug mode only).
 
     Returns an empty list if debug mode is not enabled or the log buffer
@@ -1966,7 +1992,7 @@ def shutdown() -> None:
 
     _chat_mod = sys.modules.get("stateloom.chat")
     if _chat_mod is not None:
-        _chat_mod._default_client = None
+        setattr(_chat_mod, "_default_client", None)
 
 
 def feature_status() -> dict[str, Any]:
@@ -1980,6 +2006,7 @@ def feature_status() -> dict[str, Any]:
 
 
 __all__ = [
+    "StateLoomAuthError",
     "StateLoomBlastRadiusError",
     "StateLoomBudgetError",
     "StateLoomCancellationError",
@@ -1987,11 +2014,13 @@ __all__ = [
     "StateLoomComplianceError",
     "StateLoomConfigLockedError",
     "StateLoomError",
+    "StateLoomFeatureError",
     "StateLoomGuardrailError",
     "StateLoomJobError",
     "StateLoomKillSwitchError",
     "StateLoomLicenseError",
     "StateLoomLoopError",
+    "StateLoomPermissionError",
     "StateLoomPIIBlockedError",
     "StateLoomRateLimitError",
     "StateLoomReplayError",
@@ -2117,7 +2146,6 @@ __all__ = [
 ]
 
 
-
 # ---------------------------------------------------------------------------
 # Prevent the `replay` subpackage from shadowing the public `replay()` function.
 #
@@ -2134,8 +2162,8 @@ import types as _types  # noqa: E402
 class _StateLoomModule(_types.ModuleType):
     """Custom module class that protects `replay` from subpackage shadowing."""
 
-    @property  # type: ignore[override]
-    def replay(self) -> Any:  # type: ignore[override]
+    @property
+    def replay(self) -> Any:
         return _replay_session
 
     @replay.setter

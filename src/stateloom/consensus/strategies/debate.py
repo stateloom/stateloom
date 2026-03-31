@@ -170,7 +170,11 @@ class DebateStrategy:
 
             tasks = [
                 _call_debater(
-                    m, messages_per_model[m], parent_session, per_call_budget, round_num,
+                    m,
+                    messages_per_model[m],
+                    parent_session,
+                    per_call_budget,
+                    round_num,
                     durable=config.ee_consensus,
                 )
                 for m in models
@@ -228,13 +232,9 @@ class DebateStrategy:
                     "Judge synthesis failed, falling back to confidence_weighted",
                     exc_info=True,
                 )
-                answer, conf = confidence_weighted(
-                    all_rounds[-1].responses if all_rounds else []
-                )
+                answer, conf = confidence_weighted(all_rounds[-1].responses if all_rounds else [])
         else:
-            answer, conf = confidence_weighted(
-                all_rounds[-1].responses if all_rounds else []
-            )
+            answer, conf = confidence_weighted(all_rounds[-1].responses if all_rounds else [])
 
         elapsed_ms = (time.monotonic() - start) * 1000
         winner = max(all_responses, key=lambda r: r.confidence) if all_responses else None

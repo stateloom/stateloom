@@ -89,6 +89,21 @@ class SemanticComplexityClassifier:
             self._initialized = True
             return False
 
+    @staticmethod
+    def _softmax_entailment(logits: Any) -> float:
+        """Extract entailment probability from 3-class NLI logits.
+
+        NLI CrossEncoder outputs [contradiction, entailment, neutral].
+        Apply softmax and return the entailment (index 1) probability.
+        """
+        import math
+
+        c, e, n = float(logits[0]), float(logits[1]), float(logits[2])
+        m = max(c, e, n)
+        exp_c, exp_e, exp_n = math.exp(c - m), math.exp(e - m), math.exp(n - m)
+        total = exp_c + exp_e + exp_n
+        return exp_e / total
+
     def classify(self, text: str) -> float | None:
         """Classify text complexity on a 0.0-1.0 scale.
 
@@ -98,15 +113,23 @@ class SemanticComplexityClassifier:
             if not self._lazy_init():
                 return None
 
-            scores = self._model.predict(
+            raw_scores = self._model.predict(
                 [
                     (text, self._complex_hypothesis),
                     (text, self._simple_hypothesis),
                 ]
             )
 
-            complex_score = float(scores[0])
-            simple_score = float(scores[1])
+            # CrossEncoder NLI models return shape (N, 3) logits:
+            # [contradiction, entailment, neutral].  Apply softmax per row
+            # and use the entailment probability (index 1).
+            if hasattr(raw_scores, "shape") and len(raw_scores.shape) == 2:
+                complex_score = self._softmax_entailment(raw_scores[0])
+                simple_score = self._softmax_entailment(raw_scores[1])
+            else:
+                # Single-score model (regression head)
+                complex_score = float(raw_scores[0])
+                simple_score = float(raw_scores[1])
 
             # Avoid division by zero
             total = complex_score + simple_score
