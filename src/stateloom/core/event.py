@@ -50,6 +50,7 @@ class LLMCallEvent(Event):
     is_cli_internal: bool = False
     is_tool_continuation: bool = False
     cached_response_json: str | None = None
+    request_messages_json: str | None = None
 
 
 class ToolCallEvent(Event):

@@ -578,6 +578,17 @@ def create_api_router(gate: Gate) -> APIRouter:
         page = page[:limit]
         return {"events": [_event_to_dict(e) for e in page], "has_more": has_more}
 
+    @router.get("/events/{event_id}/messages")
+    async def get_event_messages(event_id: str) -> dict[str, Any]:
+        """Lazy-load the full request messages for a single event."""
+        raw = gate.store.get_event_messages(event_id)
+        if raw is None:
+            return {"messages": None}
+        try:
+            return {"messages": json_module.loads(raw)}
+        except (json_module.JSONDecodeError, TypeError):
+            return {"messages": None}
+
     @router.get("/sessions/{session_id}/children")
     async def get_session_children(
         session_id: str,
@@ -3592,6 +3603,10 @@ def _event_details(event: object) -> dict[str, Any]:
         if hasattr(event, "cached_response_json") and event.cached_response_json:
             details.pop("cached_response_json", None)
             details["has_cached_response"] = True
+        # Mark events with stored request messages (lazy-loaded via separate endpoint)
+        if hasattr(event, "request_messages_json") and event.request_messages_json:
+            details.pop("request_messages_json", None)
+            details["has_request_messages"] = True
         return details
 
     # Fallback for non-Pydantic event objects (shouldn't happen in practice)

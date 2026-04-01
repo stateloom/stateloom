@@ -3077,3 +3077,69 @@ h3 {
     min-width: 0;
     overflow: hidden;
 }
+
+/* --- Event Filter Bar --- */
+.event-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.event-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 11px;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: opacity var(--transition), background var(--transition);
+    user-select: none;
+    line-height: 1.4;
+}
+
+.event-filter-chip:hover {
+    background: var(--bg-hover);
+}
+
+.event-filter-chip.dimmed {
+    opacity: 0.35;
+}
+
+.event-filter-chip.dimmed .event-filter-label {
+    text-decoration: line-through;
+}
+
+.event-filter-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.event-filter-reset {
+    background: none;
+    border: none;
+    color: var(--accent-cyan);
+    font-size: 11px;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    padding: 3px 8px;
+    margin-left: 4px;
+    transition: color var(--transition);
+}
+
+.event-filter-reset:hover {
+    color: var(--accent-green);
+}

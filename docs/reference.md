@@ -2715,7 +2715,7 @@ src/stateloom/
   replay/        Time-travel: engine, durable replay engine, network blocker, schema, safety checks
   pii/           PII scanner (regex + GLiNER NER), patterns, rehydrator, stream buffer
   store/         Persistence: SQLite, memory, base protocol (sessions, events, experiments, agents, users, team roles, refresh tokens, OIDC providers)
-  pricing/       Model cost calculation, bundled price data
+  pricing/       Model cost calculation, bundled price data, context-tiered pricing (PriceTier)
   dashboard/     FastAPI server, REST API (incl. agent CRUD, user management, observability), WebSocket
   proxy/         Multi-protocol proxy: HTTP reverse proxy (passthrough), OpenAI, Anthropic-native, Gemini-native, Responses API (Codex CLI) routers, auth (VK + scope enforcement), virtual keys, BYOK, billing mode, sticky sessions, per-key rate limiting
   ext/           LangChain and LangGraph callback handlers

@@ -45,8 +45,9 @@
         <div id="view-overview" class="view active">
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-label">Total Cost</div>
+                    <div class="stat-label">Est. Cost</div>
                     <div class="stat-value" id="stat-total-cost">$0.00</div>
+                    <div class="stat-sub" id="stat-total-cost-sub" style="font-size:11px;color:#888;margin-top:2px;">Actual cost may be lower with prompt caching</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Active Sessions</div>
@@ -96,7 +97,7 @@
                     <tr>
                         <th>Session ID</th>
                         <th>Status</th>
-                        <th>Cost</th>
+                        <th>Est. Cost</th>
                         <th>Tokens</th>
                         <th>Calls</th>
                         <th>Cache Hits</th>
@@ -976,7 +977,7 @@
                     <div class="stat-value" id="consensus-stat-confidence">-</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Total Cost</div>
+                    <div class="stat-label">Est. Cost</div>
                     <div class="stat-value" id="consensus-stat-cost">$0</div>
                 </div>
                 <div class="stat-card">

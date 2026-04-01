@@ -22,6 +22,17 @@ def to_openai_completion_dict(
     if not request_id:
         request_id = "chatcmpl-" + uuid.uuid4().hex[:24]
 
+    # None → empty completion (no response from provider)
+    if raw_response is None:
+        return _make_completion(
+            content="",
+            model=model,
+            request_id=request_id,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+        )
+
     # Dict passthrough (e.g. kill switch response, cached dict)
     if isinstance(raw_response, dict):
         return _normalize_dict_response(raw_response, model, request_id)

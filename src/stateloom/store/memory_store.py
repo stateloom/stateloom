@@ -182,6 +182,25 @@ class MemoryStore:
                 model_costs[model] = model_costs.get(model, 0.0) + cost
             return model_costs
 
+    def get_event_messages(self, event_id: str) -> str | None:
+        """Lazy-load request_messages_json for a single event."""
+        with self._lock:
+            for e in self._events:
+                if e.id == event_id:
+                    return getattr(e, "request_messages_json", None)
+        return None
+
+    def cleanup_request_messages(self, retention_hours: int = 24) -> int:
+        """Null out request_messages_json older than retention_hours."""
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
+        count = 0
+        with self._lock:
+            for e in self._events:
+                if getattr(e, "request_messages_json", None) is not None and e.timestamp < cutoff:
+                    e.request_messages_json = None  # type: ignore[attr-defined]
+                    count += 1
+        return count
+
     def cleanup(self, retention_days: int = 30) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
         with self._lock:

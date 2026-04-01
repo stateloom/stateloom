@@ -440,6 +440,7 @@ class SQLiteStore:
             ("score", "REAL"),
             ("comment", "TEXT"),
             ("extra_json", "TEXT"),
+            ("request_messages_json", "TEXT"),
         ]
         for col, col_type in event_migrations:
             if col not in allowed_columns or col_type not in allowed_types:
@@ -800,11 +801,12 @@ class SQLiteStore:
                         is_streaming, request_hash, tool_name, mutates_state,
                         pii_type, pii_mode, pii_field, action_taken,
                         budget_limit, budget_spent, pattern_hash, repeat_count,
-                        original_model, saved_cost, cached_response_json, metadata,
+                        original_model, saved_cost, cached_response_json,
+                        request_messages_json, metadata,
                         rating, score, comment, extra_json)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                               ?, ?, ?, ?, ?, ?, ?, ?)""",
+                               ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     self._event_to_row(event),
                 )
             self._conn.execute(
@@ -871,11 +873,12 @@ class SQLiteStore:
                     is_streaming, request_hash, tool_name, mutates_state,
                     pii_type, pii_mode, pii_field, action_taken,
                     budget_limit, budget_spent, pattern_hash, repeat_count,
-                    original_model, saved_cost, cached_response_json, metadata,
+                    original_model, saved_cost, cached_response_json,
+                    request_messages_json, metadata,
                     rating, score, comment, extra_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 self._event_to_row(event),
             )
             self._conn.commit()
@@ -888,11 +891,25 @@ class SQLiteStore:
         offset: int = 0,
     ) -> list[Event]:
         conn = self._get_conn()
+        # Exclude the full request_messages_json payload from bulk queries —
+        # use get_event_messages() for lazy-loading.  Include a lightweight
+        # boolean so _event_details can set has_request_messages.
+        cols = (
+            "id, session_id, step, event_type, timestamp, provider, model, "
+            "prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, "
+            "is_streaming, request_hash, tool_name, mutates_state, "
+            "pii_type, pii_mode, pii_field, action_taken, "
+            "budget_limit, budget_spent, pattern_hash, repeat_count, "
+            "original_model, saved_cost, cached_response_json, metadata, "
+            "rating, score, comment, extra_json, "
+            "(CASE WHEN request_messages_json IS NOT NULL THEN '1' ELSE NULL END)"
+            " AS request_messages_json"
+        )
         if session_id:
-            query = "SELECT * FROM events WHERE session_id = ?"
+            query = f"SELECT {cols} FROM events WHERE session_id = ?"
             params: list[Any] = [session_id]
         else:
-            query = "SELECT * FROM events WHERE 1=1"
+            query = f"SELECT {cols} FROM events WHERE 1=1"
             params = []
         if event_type:
             query += " AND event_type = ?"
@@ -1119,6 +1136,35 @@ class SQLiteStore:
                     "  WHERE status IN ('completed', 'error', 'budget_exceeded', 'loop_killed')"
                     ")",
                 )
+            updated = cursor.rowcount
+            self._conn.commit()
+            return updated
+
+    def get_event_messages(self, event_id: str) -> str | None:
+        """Lazy-load request_messages_json for a single event."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT request_messages_json FROM events WHERE id = ?",
+            (event_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        val: str | None = row["request_messages_json"]
+        return val
+
+    def cleanup_request_messages(self, retention_hours: int = 24) -> int:
+        """Null out request_messages_json older than retention_hours.
+
+        Returns:
+            Number of events updated.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=retention_hours)).isoformat()
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE events SET request_messages_json = NULL "
+                "WHERE request_messages_json IS NOT NULL AND timestamp < ?",
+                (cutoff,),
+            )
             updated = cursor.rowcount
             self._conn.commit()
             return updated
@@ -2667,6 +2713,7 @@ class SQLiteStore:
         "original_model",
         "saved_cost",
         "cached_response_json",
+        "request_messages_json",
         "rating",
         "score",
         "comment",
@@ -2743,6 +2790,7 @@ class SQLiteStore:
             col_vals.get("original_model"),
             col_vals.get("saved_cost"),
             col_vals.get("cached_response_json"),
+            col_vals.get("request_messages_json"),
             json.dumps(event.metadata) if event.metadata else None,
             col_vals.get("rating"),
             col_vals.get("score"),
@@ -2778,7 +2826,10 @@ class SQLiteStore:
             kwargs["metadata"] = {}
 
         # Merge direct columns (apply inverse aliases)
+        row_keys = set(row.keys())
         for col in self._DIRECT_COLS:
+            if col not in row_keys:
+                continue
             val = row[col]
             if val is not None:
                 field_name = inv.get(col, col)

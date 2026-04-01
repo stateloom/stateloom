@@ -1995,6 +1995,16 @@ def shutdown() -> None:
         setattr(_chat_mod, "_default_client", None)
 
 
+def cleanup_prompt_payloads() -> int:
+    """Manually trigger cleanup of expired request message payloads.
+
+    Returns:
+        Number of events cleaned up.
+    """
+    gate = get_gate()
+    return gate.cleanup_prompt_payloads()
+
+
 def feature_status() -> dict[str, Any]:
     """Get status of loaded enterprise features.
 
@@ -2129,6 +2139,7 @@ __all__ = [
     "set_session_id",
     "shadow_status",
     "share",
+    "cleanup_prompt_payloads",
     "shutdown",
     "signal_session",
     "start_experiment",

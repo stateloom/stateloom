@@ -17,6 +17,15 @@ let _detailEventsHasMore = false;  // whether more events are available
 let _detailEventsPageSize = parseInt(localStorage.getItem('stateloom_detailEventsPageSize')) || 200;
 const _toolStepPageSize = 20;
 
+// --- Event Filter State ---
+let _eventFilterHidden = new Set(
+    JSON.parse(localStorage.getItem('stateloom_eventFilterHidden') || '[]')
+);
+
+function _saveEventFilterState() {
+    localStorage.setItem('stateloom_eventFilterHidden', JSON.stringify([..._eventFilterHidden]));
+}
+
 function _onPageSizeChange(value) {
     const newSize = parseInt(value, 10);
     if (isNaN(newSize) || newSize === _detailEventsPageSize) return;
@@ -283,18 +292,19 @@ async function loadMoreEvents() {
         _detailEventsHasMore = !!eventsData.has_more;
         _updateEventsLoadMore();
 
-        // Re-render flat events
+        // Re-render flat events (filtered)
+        const filtered = _filterEventsByCategory(_detailEventsLoaded);
         const container = document.getElementById('detail-events');
         if (container) {
             container.innerHTML = '';
-            _detailEventsLoaded.forEach(e => {
+            filtered.forEach(e => {
                 container.appendChild(createEventLine(e));
             });
         }
 
-        // Re-render waterfall and step timeline
-        renderWaterfallTimeline(_detailEventsLoaded, null);
-        renderStepTimeline(_detailEventsLoaded);
+        // Re-render waterfall and step timeline (filtered)
+        renderWaterfallTimeline(filtered, null);
+        renderStepTimeline(filtered);
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Load More Events'; }
     }
@@ -345,11 +355,13 @@ async function loadSessionDetail(sessionId) {
     if (isSub) {
         costLabel.textContent = 'Total Cost';
         document.getElementById('detail-cost').textContent = '\u2014';
+        costSub.style.display = 'none';
     } else {
-        costLabel.textContent = 'Total Cost';
+        costLabel.textContent = 'Est. Cost';
         document.getElementById('detail-cost').textContent = `$${session.total_cost.toFixed(4)}`;
+        costSub.textContent = 'Prompt caching may lower actual cost';
+        costSub.style.display = '';
     }
-    costSub.style.display = 'none';
     document.getElementById('detail-tokens').textContent = session.total_tokens.toLocaleString();
     document.getElementById('detail-prompt-tokens').textContent = (session.total_prompt_tokens || 0).toLocaleString();
     document.getElementById('detail-completion-tokens').textContent = (session.total_completion_tokens || 0).toLocaleString();
@@ -483,9 +495,10 @@ async function loadSessionDetail(sessionId) {
     _detailEventsHasMore = !!eventsData.has_more;
     _updateEventsLoadMore();
     const events = _detailEventsLoaded;
+    const filteredEvents = _filterEventsByCategory(events);
     const container = document.getElementById('detail-events');
     container.innerHTML = '';
-    events.forEach(e => {
+    filteredEvents.forEach(e => {
         container.appendChild(createEventLine(e));
     });
 
@@ -496,6 +509,7 @@ async function loadSessionDetail(sessionId) {
     // between header totals and waterfall/tool-summary totals.
     // Also exclude CLI-internal calls (quota checks, token counting) which
     // inflate totals (e.g. a simple "hey there" appears as 16K tokens).
+    // NOTE: header stats always use UNFILTERED events — totals reflect the real session.
     {
         let evPrompt = 0, evCompletion = 0, evCost = 0, evCalls = 0;
         for (const e of events) {
@@ -518,6 +532,11 @@ async function loadSessionDetail(sessionId) {
         document.getElementById('detail-completion-tokens').textContent = evCompletion.toLocaleString();
         document.getElementById('detail-calls').textContent = evCalls;
         document.getElementById('detail-cost').textContent = isSub ? '\u2014' : `$${evCost.toFixed(4)}`;
+        if (!isSub) {
+            costLabel.textContent = 'Est. Cost';
+            costSub.textContent = 'Prompt caching may lower actual cost';
+            costSub.style.display = '';
+        }
     }
 
     // Retry stats
@@ -526,11 +545,14 @@ async function loadSessionDetail(sessionId) {
     retriesEl.textContent = retryEvents.length;
     retriesEl.style.color = retryEvents.length > 0 ? 'var(--danger)' : '';
 
-    // Waterfall trace timeline
-    renderWaterfallTimeline(events, session);
+    // Event type filter bar
+    _renderEventFilterBar();
 
-    // Step timeline (flat view, hidden by default)
-    renderStepTimeline(events);
+    // Waterfall trace timeline (filtered)
+    renderWaterfallTimeline(filteredEvents, session);
+
+    // Step timeline (flat view, hidden by default) (filtered)
+    renderStepTimeline(filteredEvents);
 
     // Parent link
     const parentLinkEl = document.getElementById('detail-parent-link');
@@ -1391,6 +1413,87 @@ const _PRIMARY_EVENT_TYPES = new Set([
     'session_lifecycle',
 ]);
 
+const _EVENT_FILTER_CATEGORIES = {
+    'llm':      { label: 'LLM Calls', types: new Set(['llm_call']),           color: '#58a6ff' },
+    'cache':    { label: 'Cache',      types: new Set(['cache_hit']),          color: '#22d3a8' },
+    'security': { label: 'Security',   types: new Set(['pii_detection', 'guardrail', 'kill_switch', 'blast_radius']), color: '#f0b429' },
+    'routing':  { label: 'Routing',    types: new Set(['local_routing', 'shadow_draft', 'circuit_breaker', 'rate_limit']), color: '#22d3ee' },
+    'system':   { label: 'System',     types: new Set(['checkpoint', 'budget_enforcement', 'loop_detection', 'semantic_retry', 'tool_call', 'session_lifecycle']), color: '#b794f6' },
+};
+
+function _filterEventsByCategory(events) {
+    if (_eventFilterHidden.size === 0) return events;
+    const hiddenTypes = new Set();
+    for (const key of _eventFilterHidden) {
+        const cat = _EVENT_FILTER_CATEGORIES[key];
+        if (cat) for (const t of cat.types) hiddenTypes.add(t);
+    }
+    return events.filter(e => !hiddenTypes.has(e.event_type));
+}
+
+function _renderEventFilterBar() {
+    let bar = document.getElementById('event-filter-bar');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'event-filter-bar';
+        bar.className = 'event-filter-bar';
+        const wc = document.getElementById('waterfall-container');
+        if (wc && wc.parentNode) {
+            wc.parentNode.insertBefore(bar, wc);
+        } else {
+            return;
+        }
+    }
+    bar.innerHTML = '';
+
+    for (const [key, cat] of Object.entries(_EVENT_FILTER_CATEGORIES)) {
+        const chip = document.createElement('button');
+        chip.className = 'event-filter-chip' + (_eventFilterHidden.has(key) ? ' dimmed' : '');
+        chip.innerHTML =
+            `<span class="event-filter-dot" style="background:${cat.color}"></span>` +
+            `<span class="event-filter-label">${cat.label}</span>`;
+        chip.onclick = () => {
+            if (_eventFilterHidden.has(key)) _eventFilterHidden.delete(key);
+            else _eventFilterHidden.add(key);
+            _saveEventFilterState();
+            _applyEventFilters();
+        };
+        bar.appendChild(chip);
+    }
+
+    if (_eventFilterHidden.size > 0) {
+        const reset = document.createElement('button');
+        reset.className = 'event-filter-reset';
+        reset.textContent = 'Show All';
+        reset.onclick = () => {
+            _eventFilterHidden.clear();
+            _saveEventFilterState();
+            _applyEventFilters();
+        };
+        bar.appendChild(reset);
+    }
+}
+
+function _applyEventFilters() {
+    _renderEventFilterBar();
+    const filtered = _filterEventsByCategory(_detailEventsLoaded);
+
+    // Re-render waterfall
+    renderWaterfallTimeline(filtered, null);
+
+    // Re-render step timeline
+    renderStepTimeline(filtered);
+
+    // Re-render flat event list
+    const container = document.getElementById('detail-events');
+    if (container) {
+        container.innerHTML = '';
+        filtered.forEach(e => {
+            container.appendChild(createEventLine(e));
+        });
+    }
+}
+
 function groupEventsIntoSteps(events) {
     const steps = [];
     let currentStep = null;
@@ -1645,7 +1748,45 @@ function buildWaterfallDetail(event) {
         }
     }
     if (Object.keys(fields).length === 0) return '';
-    return '<div class="wf-detail-content">' + buildDetailGrid(fields) + '</div>';
+    let html = '<div class="wf-detail-content">' + buildDetailGrid(fields);
+    if (event.has_request_messages) {
+        html += `<div style="margin-top:8px;"><button class="btn btn-sm" style="font-size:11px;" onclick="loadEventMessages(this, '${escapeHtml(event.id)}')">View Request Messages</button></div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+async function loadEventMessages(btn, eventId) {
+    const container = btn.parentElement;
+    const existing = container.querySelector('.wf-messages-panel');
+    if (existing) {
+        existing.remove();
+        btn.textContent = 'View Request Messages';
+        return;
+    }
+    btn.textContent = 'Loading...';
+    btn.disabled = true;
+    try {
+        const data = await fetchJSON(`/events/${encodeURIComponent(eventId)}/messages`);
+        btn.disabled = false;
+        if (!data || data.messages == null) {
+            btn.textContent = 'Messages expired';
+            btn.disabled = true;
+            return;
+        }
+        btn.textContent = 'Hide Request Messages';
+        const panel = document.createElement('div');
+        panel.className = 'wf-messages-panel';
+        panel.style.cssText = 'margin-top:8px;max-height:400px;overflow:auto;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:6px;padding:8px;';
+        const pre = document.createElement('pre');
+        pre.style.cssText = 'margin:0;font-size:11px;white-space:pre-wrap;word-break:break-word;';
+        pre.textContent = JSON.stringify(data.messages, null, 2);
+        panel.appendChild(pre);
+        container.appendChild(panel);
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'View Request Messages';
+    }
 }
 
 function _collapseToolSteps(steps) {
@@ -5097,14 +5238,15 @@ async function refreshSessionDetailEvents(sessionId) {
             _detailEventsOffset = events.length;
             _detailEventsHasMore = !!eventsData.has_more;
             _updateEventsLoadMore();
+            const filtered = _filterEventsByCategory(events);
             container.innerHTML = '';
-            events.forEach(e => {
+            filtered.forEach(e => {
                 container.appendChild(createEventLine(e));
             });
-            renderStepTimeline(events);
+            renderStepTimeline(filtered);
             // Re-render waterfall view too
-            renderWaterfallTimeline(events, null);
-            // Recompute header stats from events for consistency
+            renderWaterfallTimeline(filtered, null);
+            // Recompute header stats from UNFILTERED events for consistency
             let evPrompt = 0, evCompletion = 0, evCost = 0, evCalls = 0;
             for (const e of events) {
                 if (e.event_type !== 'llm_call') continue;

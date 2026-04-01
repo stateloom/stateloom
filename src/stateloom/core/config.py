@@ -312,7 +312,8 @@ class StateLoomConfig(BaseSettings):
     context_injection: bool = False
 
     # Payload storage (privacy-sensitive)
-    store_payloads: bool = False
+    store_payloads: bool = True
+    store_prompt_retention_hours: int = 24
 
     # Local model (Ollama)
     local_model_enabled: bool = False

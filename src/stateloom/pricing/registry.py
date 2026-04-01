@@ -13,14 +13,28 @@ _PRICES_FILE = Path(__file__).parent / "data" / "prices.json"
 
 
 @dataclass(frozen=True)
-class ModelPrice:
-    """Price per token for a model."""
+class PriceTier:
+    """Context-length pricing tier (e.g. Gemini 2x rates above 128K tokens)."""
 
+    above_tokens: int
     input_per_token: float
     output_per_token: float
 
+
+@dataclass(frozen=True)
+class ModelPrice:
+    """Price per token for a model, with optional context-length tiers."""
+
+    input_per_token: float
+    output_per_token: float
+    tiers: tuple[PriceTier, ...] = ()
+
     def calculate(self, prompt_tokens: int, completion_tokens: int) -> float:
-        return (prompt_tokens * self.input_per_token) + (completion_tokens * self.output_per_token)
+        inp, out = self.input_per_token, self.output_per_token
+        for tier in self.tiers:  # sorted ascending by above_tokens
+            if prompt_tokens > tier.above_tokens:
+                inp, out = tier.input_per_token, tier.output_per_token
+        return (prompt_tokens * inp) + (completion_tokens * out)
 
 
 class PricingRegistry:
@@ -38,9 +52,15 @@ class PricingRegistry:
                 data = json.load(f)
 
             for model_id, prices in data.get("models", {}).items():
+                tiers_data = prices.get("tiers", [])
+                tiers = tuple(
+                    PriceTier(t["above_tokens"], t["input"], t["output"])
+                    for t in sorted(tiers_data, key=lambda t: t["above_tokens"])
+                )
                 self._prices[model_id] = ModelPrice(
                     input_per_token=prices["input"],
                     output_per_token=prices["output"],
+                    tiers=tiers,
                 )
 
             self._aliases = data.get("aliases", {})
@@ -73,9 +93,16 @@ class PricingRegistry:
             return 0.0
         return price.calculate(prompt_tokens, completion_tokens)
 
-    def register(self, model: str, input_per_token: float, output_per_token: float) -> None:
+    def register(
+        self,
+        model: str,
+        input_per_token: float,
+        output_per_token: float,
+        tiers: list[PriceTier] | None = None,
+    ) -> None:
         """Register custom pricing for a model."""
         self._prices[model] = ModelPrice(
             input_per_token=input_per_token,
             output_per_token=output_per_token,
+            tiers=tuple(sorted(tiers or [], key=lambda t: t.above_tokens)),
         )

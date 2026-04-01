@@ -123,6 +123,9 @@ class Gate:
         # Managed Ollama
         self._ollama_manager: Any = None
 
+        # Throttled prompt payload cleanup
+        self._last_prompt_cleanup: float = 0.0
+
         # In-memory caches for orgs, teams, and agents
         self._orgs: dict[str, Organization] = {}
         self._teams: dict[str, Team] = {}
@@ -1299,6 +1302,7 @@ class Gate:
             self.store.save_session(session)
             self._tool_call_counts.pop(session.id, None)
             self.pipeline.notify_session_end(session.id)
+            self._maybe_cleanup_prompt_payloads()
             set_current_session(previous_session)
 
     @asynccontextmanager
@@ -1428,6 +1432,7 @@ class Gate:
             self.store.save_session(session)
             self._tool_call_counts.pop(session.id, None)
             self.pipeline.notify_session_end(session.id)
+            self._maybe_cleanup_prompt_payloads()
             set_current_session(previous_session)
 
     def get_or_create_session(
@@ -2258,6 +2263,33 @@ class Gate:
                 )
 
         return await self._consensus_orchestrator.run(config)
+
+    _PROMPT_CLEANUP_INTERVAL = 600.0  # 10 minutes between cleanup runs
+
+    def _maybe_cleanup_prompt_payloads(self) -> None:
+        """Run throttled cleanup of expired request message payloads."""
+        if not self.config.store_payloads:
+            return
+        now = time.monotonic()
+        if now - self._last_prompt_cleanup < self._PROMPT_CLEANUP_INTERVAL:
+            return
+        self._last_prompt_cleanup = now
+        try:
+            self.store.cleanup_request_messages(
+                retention_hours=self.config.store_prompt_retention_hours,
+            )
+        except Exception:
+            logger.warning("Prompt payload cleanup failed", exc_info=True)
+
+    def cleanup_prompt_payloads(self) -> int:
+        """Manually trigger cleanup of expired request message payloads.
+
+        Returns:
+            Number of events cleaned up.
+        """
+        return self.store.cleanup_request_messages(
+            retention_hours=self.config.store_prompt_retention_hours,
+        )
 
     def shutdown(self, drain_timeout: float = 5.0) -> None:
         """Clean shutdown of StateLoom.

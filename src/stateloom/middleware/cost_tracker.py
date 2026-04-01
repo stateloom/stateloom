@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -225,6 +226,16 @@ class CostTracker:
         # Flow framework context into event metadata for dashboard visibility
         if ctx._framework_context:
             event.metadata.update(ctx._framework_context)
+
+        # Store full request messages when payload storage is enabled
+        if ctx.config.store_payloads and isinstance(messages, list):
+            if not ctx.session.metadata.get("_compliance_zero_retention"):
+                try:
+                    event.request_messages_json = json.dumps(
+                        messages, default=str, ensure_ascii=False
+                    )
+                except Exception:
+                    logger.warning("Request messages serialization failed", exc_info=True)
 
         # Store response payload for durable session replay
         if ctx.session.durable:

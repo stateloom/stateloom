@@ -138,6 +138,42 @@ class PassthroughProxy:
         )
         return response
 
+    async def forward_any(
+        self,
+        method: str,
+        upstream_url: str,
+        body: bytes | None,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        """Forward a request with any HTTP method.
+
+        Unlike :meth:`forward` (POST-only), this supports GET, PUT, DELETE, etc.
+        for forwarding SDK utility calls (token counting, model listing, etc.).
+
+        Args:
+            method: HTTP method (``GET``, ``POST``, ``PUT``, ``DELETE``, etc.).
+            upstream_url: Full URL to send the request to.
+            body: Raw request body bytes, or ``None`` for body-less methods.
+            headers: Pre-filtered headers (see ``filter_headers()``).
+
+        Returns:
+            The upstream ``httpx.Response``.
+        """
+        logger.debug("Forward request: %s %s", method, upstream_url[:120])
+        response = await self._client.request(
+            method,
+            upstream_url,
+            content=body,
+            headers=headers,
+        )
+        logger.debug(
+            "Forward response: %d %s (%s)",
+            response.status_code,
+            upstream_url[:80],
+            response.headers.get("content-type", ""),
+        )
+        return response
+
     async def forward_stream(
         self,
         upstream_url: str,

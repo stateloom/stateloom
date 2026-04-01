@@ -1,5 +1,5 @@
 {
-  "_comment": "Prices in USD per token. Updated 2026-04.",
+  "_comment": "Prices in USD per token. Updated 2026-04. Tiers: if prompt_tokens > above_tokens, use that tier's rates (flat switch, last matching tier wins).",
   "models": {
     "gpt-4o": {
       "input": 0.0000025,
@@ -8,6 +8,18 @@
     "gpt-4o-mini": {
       "input": 0.00000015,
       "output": 0.0000006
+    },
+    "gpt-4.1": {
+      "input": 0.000002,
+      "output": 0.000008
+    },
+    "gpt-4.1-mini": {
+      "input": 0.0000004,
+      "output": 0.0000016
+    },
+    "gpt-4.1-nano": {
+      "input": 0.0000001,
+      "output": 0.0000004
     },
     "gpt-4-turbo": {
       "input": 0.00001,
@@ -28,6 +40,10 @@
     "o1-mini": {
       "input": 0.000003,
       "output": 0.000012
+    },
+    "o3": {
+      "input": 0.00001,
+      "output": 0.00004
     },
     "o3-mini": {
       "input": 0.0000011,
@@ -65,13 +81,20 @@
       "input": 0.0000008,
       "output": 0.000004
     },
+    "claude-haiku-4-5-20251001": {
+      "input": 0.0000008,
+      "output": 0.000004
+    },
     "gemini-3-flash": {
       "input": 0.0000005,
       "output": 0.000003
     },
     "gemini-2.5-pro": {
       "input": 0.00000125,
-      "output": 0.00001
+      "output": 0.00001,
+      "tiers": [
+        { "above_tokens": 200000, "input": 0.0000025, "output": 0.00001 }
+      ]
     },
     "gemini-2.5-flash": {
       "input": 0.00000015,
@@ -91,15 +114,24 @@
     },
     "gemini-1.5-pro": {
       "input": 0.00000125,
-      "output": 0.000005
+      "output": 0.000005,
+      "tiers": [
+        { "above_tokens": 128000, "input": 0.0000025, "output": 0.00001 }
+      ]
     },
     "gemini-1.5-flash": {
       "input": 0.0000000375,
-      "output": 0.00000015
+      "output": 0.00000015,
+      "tiers": [
+        { "above_tokens": 128000, "input": 0.000000075, "output": 0.0000003 }
+      ]
     },
     "gemini-1.5-flash-8b": {
       "input": 0.0000000375,
-      "output": 0.00000015
+      "output": 0.00000015,
+      "tiers": [
+        { "above_tokens": 128000, "input": 0.000000075, "output": 0.0000003 }
+      ]
     },
     "mistral-small-latest": {
       "input": 0.0000001,
@@ -147,11 +179,15 @@
     "gpt-4o-2024-08-06": "gpt-4o",
     "gpt-4o-2024-05-13": "gpt-4o",
     "gpt-4o-mini-2024-07-18": "gpt-4o-mini",
+    "gpt-4.1-2025-04-14": "gpt-4.1",
+    "gpt-4.1-mini-2025-04-14": "gpt-4.1-mini",
+    "gpt-4.1-nano-2025-04-14": "gpt-4.1-nano",
     "gpt-4-turbo-2024-04-09": "gpt-4-turbo",
     "gpt-4-0613": "gpt-4",
     "gpt-3.5-turbo-0125": "gpt-3.5-turbo",
     "o1-2024-12-17": "o1",
     "o1-mini-2024-09-12": "o1-mini",
+    "o3-2025-04-16": "o3",
     "gemini-3-flash-preview": "gemini-3-flash",
     "models/gemini-3-flash": "gemini-3-flash",
     "models/gemini-3-flash-preview": "gemini-3-flash",

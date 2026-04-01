@@ -81,6 +81,14 @@ class Store(Protocol):
         """Atomically persist a session and its events in a single transaction."""
         ...
 
+    def get_event_messages(self, event_id: str) -> str | None:
+        """Lazy-load request_messages_json for a single event."""
+        ...
+
+    def cleanup_request_messages(self, retention_hours: int = 24) -> int:
+        """Null out request_messages_json older than retention_hours."""
+        ...
+
     def cleanup(self, retention_days: int = 30) -> int:
         """Remove events older than retention_days. Returns count deleted."""
         ...

@@ -11,8 +11,8 @@ import pytest
 pytest.importorskip("alembic")
 pytest.importorskip("sqlalchemy")
 
-from stateloom.store.migrator import _is_existing_db, get_alembic_config, run_migrations
-from stateloom.store.sqlite_store import _SCHEMA, SQLiteStore
+from stateloom.store.migrator import _is_existing_db, run_migrations  # noqa: E402
+from stateloom.store.sqlite_store import _SCHEMA, SQLiteStore  # noqa: E402
 
 
 def _make_temp_db():
@@ -86,7 +86,7 @@ class TestFreshDatabase:
         try:
             run_migrations(url)
             version = _get_alembic_version(path)
-            assert version == "008"
+            assert version == "009"
         finally:
             os.unlink(path)
 
@@ -135,7 +135,7 @@ class TestExistingDatabase:
 
             # Verify stamped at head
             version = _get_alembic_version(path)
-            assert version == "008"
+            assert version == "009"
 
             # Verify data intact (tables still exist)
             tables = _get_tables(path)
@@ -180,7 +180,7 @@ class TestIdempotency:
             # Second run should be a no-op
             run_migrations(url)
             version = _get_alembic_version(path)
-            assert version == "008"
+            assert version == "009"
         finally:
             os.unlink(path)
 

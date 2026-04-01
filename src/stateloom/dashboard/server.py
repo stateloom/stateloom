@@ -397,6 +397,15 @@ class DashboardServer:
         )
         app.include_router(responses_router, prefix="/v1")
 
+        # Catch-all passthrough for unmatched /v1/* and /v1beta/* paths
+        # (countTokens, embeddings, model listing, etc.)
+        # Mounted LAST so specific routes above take priority.
+        from stateloom.proxy.catch_all import create_catch_all_routers
+
+        v1_catch, v1beta_catch = create_catch_all_routers(self.gate, passthrough=self._passthrough)
+        app.include_router(v1_catch, prefix="/v1")
+        app.include_router(v1beta_catch, prefix="/v1beta")
+
         # Static files (frontend)
         if STATIC_DIR.exists():
             app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
