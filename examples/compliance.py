@@ -27,7 +27,7 @@ Requires:
     export ANTHROPIC_API_KEY=sk-ant-...
     export GOOGLE_API_KEY=AIza...
 
-    python examples/18_compliance.py
+    python examples/compliance.py
 """
 
 import os
@@ -106,7 +106,7 @@ profile = hipaa_profile()
 print(f"  Standard: {profile.standard}")
 print(f"  Zero-retention logs: {profile.zero_retention_logs}")
 print(f"  Cache TTL: {profile.cache_ttl_seconds} (disabled)")
-print(f"  PII rules:")
+print("  PII rules:")
 for rule in profile.pii_rules[:4]:
     print(f"    {rule.pattern}: {rule.mode}")
 
@@ -125,7 +125,7 @@ profile = ccpa_profile()
 print(f"  Standard: {profile.standard}")
 print(f"  Region: {profile.region}")
 print(f"  Session TTL: {profile.session_ttl_days} days")
-print(f"  PII rules:")
+print("  PII rules:")
 for rule in profile.pii_rules:
     print(f"    {rule.pattern}: {rule.mode}")
 
@@ -208,7 +208,7 @@ result = stateloom.purge_user_data(
     standard="gdpr",
 )
 
-print(f"  Purge result:")
+print("  Purge result:")
 print(f"    Sessions deleted: {result.get('sessions_deleted', 0)}")
 print(f"    Events deleted: {result.get('events_deleted', 0)}")
 print(f"    Audit event ID: {result.get('audit_event_id', 'N/A')}")
@@ -231,8 +231,8 @@ org = stateloom.create_organization(
 team = stateloom.create_team(org_id=org.id, name="Research Team")
 cp = org.compliance_profile
 print(f"  Org: {org.name} (compliance={cp.standard if cp else 'none'})")
-print(f"  Resolution order: team > org > global (init)")
-print(f"  This org uses HIPAA even though global is GDPR")
+print("  Resolution order: team > org > global (init)")
+print("  This org uses HIPAA even though global is GDPR")
 
 print()
 

@@ -15,16 +15,17 @@ Prerequisites:
 Run:
 
     export OPENAI_API_KEY=sk-...   # cloud provider for routing comparison
-    python examples/07_local_models.py
+    python examples/local_models.py
 
     # or with Anthropic / Gemini as cloud provider
     export ANTHROPIC_API_KEY=sk-ant-...
-    python examples/07_local_models.py
+    python examples/local_models.py
 """
 
 import os
+
 import stateloom
-from stateloom.local import detect_hardware, recommend_models, OllamaClient
+from stateloom.local import OllamaClient, detect_hardware, recommend_models
 
 # ── Detect provider for cloud calls ──────────────────────────────────
 
@@ -88,7 +89,8 @@ try:
             messages=[{"role": "user", "content": "What is a hash map? One sentence."}],
         )
         print(f"  Response: {response.content[:120]}")
-        print(f"  Tokens: {response.total_tokens} | Latency: {response.latency_ms:.0f}ms | Cost: $0.00")
+        latency = f"{response.latency_ms:.0f}ms"
+        print(f"  Tokens: {response.total_tokens} | Latency: {latency} | Cost: $0.00")
     else:
         print(f"  Model '{LOCAL_MODEL}' not installed. Run: ollama pull {LOCAL_MODEL}")
 except Exception as e:
@@ -122,8 +124,15 @@ try:
     ]
 
     COMPLEX_PROMPTS = [
-        "Design a distributed consensus algorithm that handles Byzantine faults with proof of correctness.",
-        "Compare the trade-offs between event sourcing and CQRS in a microservices architecture with eventual consistency requirements.",
+        (
+            "Design a distributed consensus algorithm that"
+            " handles Byzantine faults with proof of correctness."
+        ),
+        (
+            "Compare the trade-offs between event sourcing and"
+            " CQRS in a microservices architecture with eventual"
+            " consistency requirements."
+        ),
     ]
 
     print("  Simple prompts (may route to local):")
@@ -152,4 +161,4 @@ try:
 except Exception as e:
     print(f"  Auto-routing requires Ollama running with {LOCAL_MODEL}: {e}")
 
-print(f"\nDashboard: http://localhost:4782")
+print("\nDashboard: http://localhost:4782")

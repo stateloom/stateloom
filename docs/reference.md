@@ -128,16 +128,16 @@ response = client.chat.completions.create(
 
 StateLoom auto-detects and patches installed LLM clients:
 
-| Provider | Package | Auto-patched |
-|----------|---------|:------------:|
-| OpenAI | `openai` | Yes |
-| Anthropic | `anthropic` | Yes |
-| Google Gemini | `google-generativeai` | Yes |
-| Cohere | `cohere` | Yes |
-| Mistral | `mistralai` | Yes |
-| LiteLLM | `litellm` | Yes |
-| Ollama (local) | — | Via `local_model=` |
-| Custom | any | Via `register_provider()` |
+| Provider | Package | Auto-patched | Streaming |
+|----------|---------|:------------:|:---------:|
+| OpenAI | `openai` | Yes | `stream=True` |
+| Anthropic | `anthropic` | Yes | `stream=True` |
+| Google Gemini | `google-generativeai` or `google-genai` | Yes | `generate_content_stream()` |
+| Cohere | `cohere` | Yes | `chat_stream()` |
+| Mistral | `mistralai` | Yes | `chat.stream()` |
+| LiteLLM | `litellm` | Yes | `stream=True` |
+| Ollama (local) | — | Via `local_model=` | — |
+| Custom | any | Via `register_provider()` | — |
 
 ### Explicit wrapping (no monkey-patching)
 

@@ -115,10 +115,14 @@ def patch_provider(gate: Gate, adapter: ProviderAdapter) -> list[str]:
         original = getattr(target.target_class, target.method_name)
 
         if target.is_async:
-            async_wrapper = _build_async_wrapper(gate, adapter, original)
+            async_wrapper = _build_async_wrapper(
+                gate, adapter, original, always_streaming=target.always_streaming
+            )
             setattr(target.target_class, target.method_name, async_wrapper)
         else:
-            sync_wrapper = _build_sync_wrapper(gate, adapter, original)
+            sync_wrapper = _build_sync_wrapper(
+                gate, adapter, original, always_streaming=target.always_streaming
+            )
             setattr(target.target_class, target.method_name, sync_wrapper)
 
         register_patch(
@@ -136,20 +140,34 @@ def patch_provider(gate: Gate, adapter: ProviderAdapter) -> list[str]:
     return patched
 
 
-def _build_sync_wrapper(gate: Gate, adapter: ProviderAdapter, original: Any) -> Any:
+def _build_sync_wrapper(
+    gate: Gate,
+    adapter: ProviderAdapter,
+    original: Any,
+    always_streaming: bool = False,
+) -> Any:
     """Build a sync wrapper function for the given original method."""
 
     def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
-        return _intercept_sync(gate, adapter, original, self, args, kwargs)
+        return _intercept_sync(
+            gate, adapter, original, self, args, kwargs, always_streaming=always_streaming
+        )
 
     return wrapped
 
 
-def _build_async_wrapper(gate: Gate, adapter: ProviderAdapter, original: Any) -> Any:
+def _build_async_wrapper(
+    gate: Gate,
+    adapter: ProviderAdapter,
+    original: Any,
+    always_streaming: bool = False,
+) -> Any:
     """Build an async wrapper function for the given original method."""
 
     async def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
-        return await _intercept_async(gate, adapter, original, self, args, kwargs)
+        return await _intercept_async(
+            gate, adapter, original, self, args, kwargs, always_streaming=always_streaming
+        )
 
     return wrapped
 
@@ -161,6 +179,7 @@ def _intercept_sync(
     instance: Any,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    always_streaming: bool = False,
 ) -> Any:
     """Intercept a sync LLM call through the middleware pipeline."""
     _inject_api_key_if_needed(gate, adapter, instance)
@@ -187,10 +206,12 @@ def _intercept_sync(
         except Exception:
             provider_base_url = ""
 
-        # Compliance: force non-streaming for regulated profiles
-        is_streaming = adapter.is_streaming(kwargs)
+        # Compliance: force non-streaming for regulated profiles.
+        # Skip when always_streaming — those methods are inherently streaming
+        # (e.g. genai generate_content_stream) and cannot be downgraded via kwarg.
+        is_streaming = always_streaming or adapter.is_streaming(kwargs)
         profile = gate._get_compliance_profile(session.org_id, session.team_id)
-        if profile and profile.block_streaming and is_streaming:
+        if profile and profile.block_streaming and is_streaming and not always_streaming:
             logger.debug("Compliance: forcing non-streaming for session=%s", session.id)
             kwargs["stream"] = False
             is_streaming = False
@@ -279,6 +300,7 @@ async def _intercept_async(
     instance: Any,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    always_streaming: bool = False,
 ) -> Any:
     """Intercept an async LLM call through the middleware pipeline."""
     _inject_api_key_if_needed(gate, adapter, instance)
@@ -305,10 +327,12 @@ async def _intercept_async(
         except Exception:
             provider_base_url = ""
 
-        # Compliance: force non-streaming for regulated profiles
-        is_streaming = adapter.is_streaming(kwargs)
+        # Compliance: force non-streaming for regulated profiles.
+        # Skip when always_streaming — those methods are inherently streaming
+        # (e.g. genai generate_content_stream) and cannot be downgraded via kwarg.
+        is_streaming = always_streaming or adapter.is_streaming(kwargs)
         profile = gate._get_compliance_profile(session.org_id, session.team_id)
-        if profile and profile.block_streaming and is_streaming:
+        if profile and profile.block_streaming and is_streaming and not always_streaming:
             logger.debug("Compliance: forcing non-streaming for session=%s", session.id)
             kwargs["stream"] = False
             is_streaming = False

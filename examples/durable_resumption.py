@@ -11,18 +11,19 @@ Demonstrates:
 Run:
 
     export OPENAI_API_KEY=sk-...
-    python examples/08_durable_resumption.py
+    python examples/durable_resumption.py
 
     # Run it AGAIN to see durable replay in action:
-    python examples/08_durable_resumption.py
+    python examples/durable_resumption.py
 
     # or with Anthropic / Gemini
     export ANTHROPIC_API_KEY=sk-ant-...
-    python examples/08_durable_resumption.py
+    python examples/durable_resumption.py
 """
 
 import json
 import os
+
 import stateloom
 
 # ── Init ──────────────────────────────────────────────────────────────
@@ -38,16 +39,19 @@ if os.environ.get("OPENAI_API_KEY"):
     PROVIDER = "openai"
     MODEL = "gpt-4o-mini"
     import openai
+
     sdk_client = openai.OpenAI()
 elif os.environ.get("ANTHROPIC_API_KEY"):
     PROVIDER = "anthropic"
     MODEL = "claude-haiku-4-5-20251001"
     import anthropic
+
     sdk_client = anthropic.Anthropic()
 elif os.environ.get("GOOGLE_API_KEY"):
     PROVIDER = "gemini"
     MODEL = "gemini-2.5-flash"
     import google.generativeai as genai
+
     sdk_client = genai.GenerativeModel(MODEL)
 else:
     print("Set at least one API key: OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY")
@@ -66,7 +70,11 @@ def sdk_chat(prompt: str, system: str | None = None) -> str:
         resp = sdk_client.chat.completions.create(model=MODEL, messages=messages)
         return resp.choices[0].message.content
     elif PROVIDER == "anthropic":
-        kwargs = {"model": MODEL, "max_tokens": 256, "messages": [{"role": "user", "content": prompt}]}
+        kwargs = {
+            "model": MODEL,
+            "max_tokens": 256,
+            "messages": [{"role": "user", "content": prompt}],
+        }
         if system:
             kwargs["system"] = system
         resp = sdk_client.messages.create(**kwargs)
@@ -111,7 +119,7 @@ with stateloom.session("durable-demo-1", budget=2.0, durable=True) as s:
     print(f"    Cost: ${s.total_cost:.6f} | Step: {s.step_counter}")
 
 print(f"  Total: ${s.total_cost:.6f} | {s.call_count} calls")
-print(f"  (Run again — all 3 steps will replay from cache at zero cost)")
+print("  (Run again — all 3 steps will replay from cache at zero cost)")
 
 print()
 
@@ -141,7 +149,7 @@ with stateloom.session("checkpoint-demo", budget=2.0, durable=True) as s:
     stateloom.checkpoint("pipeline-done", "All steps completed")
     print("  Checkpoint: pipeline-done")
 
-print(f"  Dashboard shows checkpoints as dividers in the waterfall timeline")
+print("  Dashboard shows checkpoints as dividers in the waterfall timeline")
 
 print()
 
@@ -216,8 +224,8 @@ try:
     print(f"  Topic: {facts.get('topic', 'N/A')}")
     print(f"  Summary: {facts.get('summary', 'N/A')[:80]}")
     print(f"  Concepts: {', '.join(facts.get('key_concepts', []))}")
-    print(f"  (Durable — run again to replay from cache)")
+    print("  (Durable — run again to replay from cache)")
 except stateloom.StateLoomRetryError as e:
     print(f"  All retries exhausted: {e}")
 
-print(f"\nDashboard: http://localhost:4782")
+print("\nDashboard: http://localhost:4782")

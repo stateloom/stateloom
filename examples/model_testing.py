@@ -26,7 +26,7 @@ Requires:
     # or
     export GOOGLE_API_KEY=AIza...
 
-    python examples/19_model_testing.py
+    python examples/model_testing.py
 """
 
 import os
@@ -56,8 +56,8 @@ if len(available) < 2:
     print("  export GOOGLE_API_KEY=AIza...")
     raise SystemExit(1)
 
-MODEL = available[0]           # Primary (production)
-CANDIDATE = available[1]       # Candidate (dark launch)
+MODEL = available[0]  # Primary (production)
+CANDIDATE = available[1]  # Candidate (dark launch)
 
 print(f"Primary model:   {MODEL}")
 print(f"Candidate model: {CANDIDATE}")

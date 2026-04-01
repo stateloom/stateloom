@@ -136,12 +136,15 @@ class MistralAdapter(BaseProviderAdapter):
 
         def llm_call() -> Any:
             try:
-                from mistralai import Mistral  # type: ignore[attr-defined]
+                from mistralai.client import Mistral
             except ImportError:
-                raise ImportError(
-                    "mistralai package is required for Mistral models. "
-                    "Install with: pip install mistralai"
-                )
+                try:
+                    from mistralai import Mistral  # type: ignore[attr-defined,no-redef]
+                except ImportError:
+                    raise ImportError(
+                        "mistralai package is required for Mistral models. "
+                        "Install with: pip install mistralai"
+                    )
 
             from stateloom.intercept.unpatch import get_original
 
@@ -152,7 +155,7 @@ class MistralAdapter(BaseProviderAdapter):
             original = get_original(type(client.chat), "complete")
             method = original or client.chat.complete
             if original:
-                return method(client.chat, **request_kwargs)
+                return method(client.chat, **request_kwargs)  # type: ignore[misc,arg-type]
             return method(**request_kwargs)
 
         return request_kwargs, llm_call

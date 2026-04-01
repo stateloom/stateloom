@@ -13,7 +13,7 @@ Run with one or more provider keys:
     export OPENAI_API_KEY=sk-...
     export ANTHROPIC_API_KEY=sk-ant-...
     export GOOGLE_API_KEY=AIza...
-    python examples/04_pii_detection.py
+    python examples/pii_detection.py
 """
 
 import os
@@ -29,6 +29,7 @@ providers = {}
 if os.environ.get("OPENAI_API_KEY"):
     try:
         import openai
+
         providers["openai"] = "gpt-4o-mini"
     except ImportError:
         pass
@@ -36,6 +37,7 @@ if os.environ.get("OPENAI_API_KEY"):
 if os.environ.get("ANTHROPIC_API_KEY"):
     try:
         import anthropic
+
         providers["anthropic"] = "claude-haiku-4-5-20251001"
     except ImportError:
         pass
@@ -43,6 +45,7 @@ if os.environ.get("ANTHROPIC_API_KEY"):
 if os.environ.get("GOOGLE_API_KEY"):
     try:
         import google.generativeai as genai
+
         providers["gemini"] = "gemini-2.5-flash"
     except ImportError:
         pass
@@ -119,10 +122,12 @@ with stateloom.session("pii-audit-demo") as s:
     # stateloom.chat() call — same PII scanning
     response = stateloom.chat(
         model=CHAT_MODEL,
-        messages=[{
-            "role": "user",
-            "content": "Also notify sarah@company.org about the update",
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": "Also notify sarah@company.org about the update",
+            }
+        ],
     )
     print(f"  stateloom.chat: {response.content[:100]}")
     print(f"  PII detections: {s.pii_detections} (emails detected, request sent as-is)\n")
@@ -163,10 +168,12 @@ with stateloom.session("pii-redact-demo") as s:
     # stateloom.chat() — same redaction applies
     response = stateloom.chat(
         model=CHAT_MODEL,
-        messages=[{
-            "role": "user",
-            "content": "Also reach out to hr@acme.co at 310-555-0142",
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": "Also reach out to hr@acme.co at 310-555-0142",
+            }
+        ],
     )
     print(f"  stateloom.chat: {response.content[:120]}")
     print(f"  PII detections: {s.pii_detections}")
@@ -208,10 +215,12 @@ with stateloom.session("pii-block-demo") as s:
     try:
         stateloom.chat(
             model=CHAT_MODEL,
-            messages=[{
-                "role": "user",
-                "content": "My SSN is 078-05-1120, use it for verification.",
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": "My SSN is 078-05-1120, use it for verification.",
+                }
+            ],
         )
     except stateloom.StateLoomPIIBlockedError as e:
         print(f"  SSN via stateloom.chat (blocked): {e}")
@@ -235,8 +244,10 @@ print("=" * 60)
 print("4. GDPR compliance — enable in the dashboard")
 print("=" * 60)
 
-input("  Enable GDPR in the dashboard (Compliance → Set Global Profile → GDPR),\n"
-      "  then press Enter to continue...")
+input(
+    "  Enable GDPR in the dashboard (Compliance → Set Global Profile → GDPR),\n"
+    "  then press Enter to continue..."
+)
 
 stateloom.init(pii=True)
 
@@ -255,10 +266,12 @@ with stateloom.session("gdpr-demo") as s:
     try:
         stateloom.chat(
             model=CHAT_MODEL,
-            messages=[{
-                "role": "user",
-                "content": "My SSN is 078-05-1120, verify it.",
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": "My SSN is 078-05-1120, verify it.",
+                }
+            ],
         )
     except stateloom.StateLoomPIIBlockedError as e:
         print(f"  SSN via stateloom.chat (blocked): {e}")
@@ -267,5 +280,5 @@ with stateloom.session("gdpr-demo") as s:
 
 stateloom.shutdown()
 
-print(f"\nDashboard: http://localhost:4782")
+print("\nDashboard: http://localhost:4782")
 print("Check the PII Detections column in each session for detection counts.")

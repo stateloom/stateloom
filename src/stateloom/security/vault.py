@@ -52,7 +52,7 @@ class SecretVault:
             return
 
         self._enabled = True
-        target_keys = keys if keys else list(_DEFAULT_KEYS)
+        target_keys = keys if keys is not None else list(_DEFAULT_KEYS)
 
         with self._lock:
             for key in target_keys:

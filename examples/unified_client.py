@@ -10,21 +10,22 @@ Demonstrates:
 Run with any provider key:
 
     export OPENAI_API_KEY=sk-...
-    python examples/02_unified_client.py
+    python examples/unified_client.py
 
     export ANTHROPIC_API_KEY=sk-ant-...
-    python examples/02_unified_client.py
+    python examples/unified_client.py
 
     export GOOGLE_API_KEY=AIza...
-    python examples/02_unified_client.py
+    python examples/unified_client.py
 """
 
 import os
+
 import stateloom
 
 stateloom.init(
     pii=True,
-    cache_backend="sqlite", # cache across sessions, by default it uses in memory cache
+    cache_backend="sqlite",  # cache across sessions, by default it uses in memory cache
 )
 
 # ── Model → Provider mapping ─────────────────────────────────────────
@@ -42,11 +43,7 @@ MODELS = {
 }
 
 # Filter to providers with keys set
-available = {
-    name: model
-    for name, (model, env_var) in MODELS.items()
-    if os.environ.get(env_var)
-}
+available = {name: model for name, (model, env_var) in MODELS.items() if os.environ.get(env_var)}
 
 if not available:
     print("No provider API keys found. Set at least one of:")
@@ -98,6 +95,7 @@ for provider_name, model in available.items():
 
 import asyncio
 
+
 async def main():
     async with stateloom.async_session("async-demo-1", budget=1.0) as s:
         for provider_name, model in available.items():
@@ -107,6 +105,7 @@ async def main():
             )
             print(f"{provider_name}: {response.content[:100]}")
         print(f"Total: ${s.total_cost:.4f}")
+
 
 asyncio.run(main())
 

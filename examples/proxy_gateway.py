@@ -35,14 +35,13 @@ Requires:
     export ANTHROPIC_API_KEY=sk-ant-...
     export GOOGLE_API_KEY=AIza...
 
-    python examples/20_proxy_gateway.py
+    python examples/proxy_gateway.py
 """
 
 import os
 import time
 
 import httpx  # Already a stateloom dependency
-
 import stateloom
 
 # ── Detect available provider ────────────────────────────────────────
@@ -66,6 +65,7 @@ print(f"Using model: {MODEL}\n")
 
 
 # ── Helper: send requests through the proxy ──────────────────────────
+
 
 def proxy_request(content, *, model=None):
     """Send a chat through the proxy using the provider's native endpoint.
@@ -282,7 +282,8 @@ elif PROVIDER == "anthropic":
     -H "Content-Type: application/json" \\
     -H "x-api-key: $ANTHROPIC_API_KEY" \\
     -H "anthropic-version: 2023-06-01" \\
-    -d '{{"model": "{MODEL}", "max_tokens": 100, "messages": [{{"role": "user", "content": "Hello!"}}]}}'
+    -d '{{"model": "{MODEL}", "max_tokens": 100, \
+"messages": [{{"role": "user", "content": "Hello!"}}]}}'
 """)
 elif PROVIDER == "gemini":
     print(f"""  curl {PROXY}/v1beta/models/{MODEL}:generateContent \\
@@ -314,7 +315,7 @@ text, status, data = proxy_request("My SSN is 123-45-6789")
 if status >= 400:
     print(f"  SSN blocked (HTTP {status}): {_error_message(data)[:80]}")
 else:
-    print(f"  SSN passed (unexpected)")
+    print("  SSN passed (unexpected)")
 
 print()
 

@@ -11,16 +11,17 @@ Demonstrates:
 Run:
 
     export OPENAI_API_KEY=sk-...
-    python examples/10_time_travel.py
+    python examples/time_travel.py
 
     # or with Anthropic / Gemini
     export ANTHROPIC_API_KEY=sk-ant-...
-    python examples/10_time_travel.py
+    python examples/time_travel.py
 """
 
 import os
 import tempfile
 import time
+
 import stateloom
 
 # ── Init ──────────────────────────────────────────────────────────────
@@ -36,16 +37,19 @@ if os.environ.get("OPENAI_API_KEY"):
     PROVIDER = "openai"
     MODEL = "gpt-4o-mini"
     import openai
+
     sdk_client = openai.OpenAI()
 elif os.environ.get("ANTHROPIC_API_KEY"):
     PROVIDER = "anthropic"
     MODEL = "claude-haiku-4-5-20251001"
     import anthropic
+
     sdk_client = anthropic.Anthropic()
 elif os.environ.get("GOOGLE_API_KEY"):
     PROVIDER = "gemini"
     MODEL = "gemini-2.5-flash"
     import google.generativeai as genai
+
     sdk_client = genai.GenerativeModel(MODEL)
 else:
     print("Set at least one API key: OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY")
@@ -64,7 +68,11 @@ def sdk_chat(prompt: str, system: str | None = None) -> str:
         resp = sdk_client.chat.completions.create(model=MODEL, messages=messages)
         return resp.choices[0].message.content
     elif PROVIDER == "anthropic":
-        kwargs = {"model": MODEL, "max_tokens": 256, "messages": [{"role": "user", "content": prompt}]}
+        kwargs = {
+            "model": MODEL,
+            "max_tokens": 256,
+            "messages": [{"role": "user", "content": prompt}],
+        }
         if system:
             kwargs["system"] = system
         resp = sdk_client.messages.create(**kwargs)
@@ -79,12 +87,12 @@ def sdk_chat(prompt: str, system: str | None = None) -> str:
 # steps 4-6 use native SDK calls (auto-patched by StateLoom).
 
 QUESTIONS = [
-    "What is a hash table? One sentence.",                  # Step 1 — stateloom.chat
-    "What is a binary search tree? One sentence.",          # Step 2 — stateloom.chat
-    "What is a bloom filter? One sentence.",                # Step 3 — stateloom.chat
-    "What is a skip list? One sentence.",                   # Step 4 — native SDK
-    "What is a trie? One sentence.",                        # Step 5 — native SDK
-    "Compare all five data structures in one sentence.",    # Step 6 — native SDK
+    "What is a hash table? One sentence.",  # Step 1 — stateloom.chat
+    "What is a binary search tree? One sentence.",  # Step 2 — stateloom.chat
+    "What is a bloom filter? One sentence.",  # Step 3 — stateloom.chat
+    "What is a skip list? One sentence.",  # Step 4 — native SDK
+    "What is a trie? One sentence.",  # Step 5 — native SDK
+    "Compare all five data structures in one sentence.",  # Step 6 — native SDK
 ]
 
 
@@ -106,7 +114,7 @@ def run_pipeline():
         elapsed = (time.perf_counter() - t0) * 1000
         results.append((text, elapsed))
         label = "stateloom.chat" if i < 3 else "native SDK"
-        print(f"    Step {i+1} ({label}): {text[:70]}  [{elapsed:.0f}ms]")
+        print(f"    Step {i + 1} ({label}): {text[:70]}  [{elapsed:.0f}ms]")
     return results
 
 
@@ -198,11 +206,11 @@ for i, event in enumerate(bundle["events"]):
     label = event.get("label", "")
     cached = "yes" if event.get("cached_response_json") else "no"
     if etype == "checkpoint":
-        print(f"    [{i+1}] {etype}: {label}")
+        print(f"    [{i + 1}] {etype}: {label}")
     elif etype == "llm_call":
-        print(f"    [{i+1}] {etype}: model={model}, cost=${cost:.6f}, cached_response={cached}")
+        print(f"    [{i + 1}] {etype}: model={model}, cost=${cost:.6f}, cached_response={cached}")
     else:
-        print(f"    [{i+1}] {etype}")
+        print(f"    [{i + 1}] {etype}")
 
 print()
 
@@ -260,7 +268,7 @@ with stateloom.mock("vcr-demo") as m2:
 print(f"  Replay run — is_replay: {m2.is_replay}")
 print(f"  Replay 1: {text1_replay[:80]}")
 print(f"  Replay 2: {text2_replay[:80]}")
-print(f"  (Second run was instant — zero API cost)")
+print("  (Second run was instant — zero API cost)")
 
 print()
 
@@ -297,4 +305,4 @@ if children_count > 0:
     print(f"  Child events: {len(child_bundle['events'])}")
 
 print()
-print(f"Dashboard: http://localhost:4782")
+print("Dashboard: http://localhost:4782")

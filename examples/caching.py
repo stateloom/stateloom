@@ -12,14 +12,15 @@ Demonstrates:
 Run:
 
     export OPENAI_API_KEY=sk-...
-    python examples/06_caching.py
+    python examples/caching.py
 
     # or with Anthropic / Gemini
     export ANTHROPIC_API_KEY=sk-ant-...
-    python examples/06_caching.py
+    python examples/caching.py
 """
 
 import os
+
 import stateloom
 
 # ── Detect provider ──────────────────────────────────────────────────
@@ -105,7 +106,7 @@ with stateloom.session("cache-session-b", budget=1.0) as sb:
         messages=[{"role": "user", "content": SHARED_PROMPT}],
     )
     print(f"  Session B: cost=${sb.total_cost:.6f}, cache hits={sb.cache_hits}")
-    print(f"    Session B paid nothing — served from global cache!")
+    print("    Session B paid nothing — served from global cache!")
 
 print()
 
@@ -126,13 +127,19 @@ SCOPED_PROMPT = "What is a mutex? One sentence."
 with stateloom.session("scoped-session-x", budget=1.0) as sx:
     stateloom.chat(model=MODEL, messages=[{"role": "user", "content": SCOPED_PROMPT}])
     stateloom.chat(model=MODEL, messages=[{"role": "user", "content": SCOPED_PROMPT}])
-    print(f"  Session X: {sx.call_count} calls, {sx.cache_hits} cache hit(s), cost=${sx.total_cost:.6f}")
+    print(
+        f"  Session X: {sx.call_count} calls, "
+        f"{sx.cache_hits} cache hit(s), cost=${sx.total_cost:.6f}"
+    )
 
 # Session Y — same prompt, but session-scoped so it's a miss
 with stateloom.session("scoped-session-y", budget=1.0) as sy:
     stateloom.chat(model=MODEL, messages=[{"role": "user", "content": SCOPED_PROMPT}])
-    print(f"  Session Y: {sy.call_count} calls, {sy.cache_hits} cache hit(s), cost=${sy.total_cost:.6f}")
-    print(f"    Session Y had a cache miss — scoped caches don't share!")
+    print(
+        f"  Session Y: {sy.call_count} calls, "
+        f"{sy.cache_hits} cache hit(s), cost=${sy.total_cost:.6f}"
+    )
+    print("    Session Y had a cache miss — scoped caches don't share!")
 
 print()
 
@@ -156,13 +163,17 @@ QUESTIONS = [
 with stateloom.session("unique-prompts", budget=1.0) as s_unique:
     for q in QUESTIONS:
         stateloom.chat(model=MODEL, messages=[{"role": "user", "content": q}])
-    print(f"  3 unique prompts:   cost=${s_unique.total_cost:.6f}, cache hits={s_unique.cache_hits}")
+    print(
+        f"  3 unique prompts:   cost=${s_unique.total_cost:.6f}, cache hits={s_unique.cache_hits}"
+    )
 
 # Same 3 prompts repeated (all cached from previous session via global scope)
 with stateloom.session("repeated-prompts", budget=1.0) as s_repeat:
     for q in QUESTIONS:
         stateloom.chat(model=MODEL, messages=[{"role": "user", "content": q}])
-    print(f"  3 repeated prompts: cost=${s_repeat.total_cost:.6f}, cache hits={s_repeat.cache_hits}")
+    print(
+        f"  3 repeated prompts: cost=${s_repeat.total_cost:.6f}, cache hits={s_repeat.cache_hits}"
+    )
 
 savings = s_unique.total_cost - s_repeat.total_cost
 print(f"  Savings from cache: ${savings:.6f} ({s_repeat.cache_hits} hits)")
@@ -194,6 +205,6 @@ with stateloom.session("loop-demo", budget=1.0) as s:
         print(f"  Call {i + 1}: {text}  {blocked}")
 
     print(f"  Calls: {s.call_count} | Cost: ${s.total_cost:.6f}")
-    print(f"  Calls 1-4 succeeded, call 5+ blocked by loop detector")
+    print("  Calls 1-4 succeeded, call 5+ blocked by loop detector")
 
-print(f"\nDashboard: http://localhost:4782")
+print("\nDashboard: http://localhost:4782")

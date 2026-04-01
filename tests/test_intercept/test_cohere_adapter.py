@@ -23,8 +23,16 @@ class TestCohereAdapterUnit:
 
     def test_get_patch_targets(self):
         targets = self._adapter().get_patch_targets()
-        # Returns [] if cohere not installed, or 2 targets if it is
-        assert len(targets) in (0, 2)
+        # Returns [] if cohere not installed, or 4 targets if it is
+        assert len(targets) in (0, 4)
+
+    def test_get_patch_targets_includes_chat_stream(self):
+        targets = self._adapter().get_patch_targets()
+        if targets:
+            stream_targets = [t for t in targets if t.method_name == "chat_stream"]
+            assert len(stream_targets) == 2
+            for t in stream_targets:
+                assert t.always_streaming is True
 
     def test_extract_model_from_kwargs(self):
         adapter = self._adapter()
@@ -106,29 +114,89 @@ class TestCohereAdapterUnit:
         assert kwargs["messages"][0]["content"] == "new"
         assert len(kwargs["messages"]) == 2
 
-    def test_get_instance_targets_v2_client(self):
-        """V2 clients have 'V2' in class name."""
+    def test_get_instance_targets_v2_includes_stream(self):
+        """V2 clients return both chat and chat_stream targets."""
 
         class FakeClientV2:
             pass
 
         client = FakeClientV2()
         targets = self._adapter().get_instance_targets(client)
-        assert len(targets) == 1
-        assert targets[0][1] == "chat"
+        assert len(targets) == 2
+        assert targets[0] == (client, "chat")
+        assert targets[1] == (client, "chat_stream")
 
     def test_get_instance_targets_v1_with_v2_accessor(self):
-        """V1 clients with .v2 property."""
+        """V1 clients with .v2 property return both chat and chat_stream."""
         v2 = SimpleNamespace()
         client = SimpleNamespace(v2=v2)
         targets = self._adapter().get_instance_targets(client)
-        assert len(targets) == 1
-        assert targets[0][0] is v2
-        assert targets[0][1] == "chat"
+        assert len(targets) == 2
+        assert targets[0] == (v2, "chat")
+        assert targets[1] == (v2, "chat_stream")
 
     def test_get_instance_targets_unknown(self):
         client = SimpleNamespace()
         assert self._adapter().get_instance_targets(client) == []
+
+
+class TestCohereStreamChunks:
+    """Tests for extract_chunk_info / modify_chunk_text streaming support."""
+
+    def _adapter(self):
+        return CohereAdapter()
+
+    def test_extract_chunk_info_content_delta(self):
+        chunk = SimpleNamespace(
+            type="content-delta",
+            delta=SimpleNamespace(message=SimpleNamespace(content=SimpleNamespace(text="hello"))),
+        )
+        info = self._adapter().extract_chunk_info(chunk)
+        assert info.text_delta == "hello"
+        assert info.finish_reason is None
+        assert info.has_usage is False
+
+    def test_extract_chunk_info_message_end(self):
+        chunk = SimpleNamespace(
+            type="message-end",
+            delta=SimpleNamespace(
+                finish_reason="COMPLETE",
+                usage=SimpleNamespace(
+                    tokens=SimpleNamespace(
+                        input_tokens=20.0,
+                        output_tokens=10.0,
+                    )
+                ),
+            ),
+        )
+        info = self._adapter().extract_chunk_info(chunk)
+        assert info.finish_reason == "COMPLETE"
+        assert info.prompt_tokens == 20
+        assert info.completion_tokens == 10
+        assert info.has_usage is True
+        assert info.text_delta == ""
+
+    def test_extract_chunk_info_unknown_event(self):
+        chunk = SimpleNamespace(type="message-start")
+        info = self._adapter().extract_chunk_info(chunk)
+        assert info.text_delta == ""
+        assert info.finish_reason is None
+        assert info.has_usage is False
+
+    def test_modify_chunk_text_content_delta(self):
+        chunk = SimpleNamespace(
+            type="content-delta",
+            delta=SimpleNamespace(
+                message=SimpleNamespace(content=SimpleNamespace(text="original"))
+            ),
+        )
+        result = self._adapter().modify_chunk_text(chunk, "replaced")
+        assert result.delta.message.content.text == "replaced"
+
+    def test_modify_chunk_text_non_delta_noop(self):
+        chunk = SimpleNamespace(type="message-start", delta=SimpleNamespace())
+        result = self._adapter().modify_chunk_text(chunk, "replaced")
+        assert result is chunk  # returned unchanged
 
 
 class TestProviderEnum:

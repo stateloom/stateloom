@@ -10,23 +10,24 @@ Demonstrates:
 Run with one provider at a time or all at once:
 
     export OPENAI_API_KEY=sk-...
-    python examples/01_quick_start.py
+    python examples/quick_start.py
 
     export ANTHROPIC_API_KEY=sk-ant-...
-    python examples/01_quick_start.py
+    python examples/quick_start.py
 
     export GOOGLE_API_KEY=AIza...
-    python examples/01_quick_start.py
+    python examples/quick_start.py
 """
 
 import os
+
 import stateloom
 
 # ── Init ──────────────────────────────────────────────────────────────
 
 stateloom.init(
-    budget=2.0,    # default per-session budget (USD)
-    pii=True,      # scan every request for PII
+    budget=2.0,  # default per-session budget (USD)
+    pii=True,  # scan every request for PII
 )
 
 # ── Detect which SDKs + keys are available ────────────────────────────
@@ -36,6 +37,7 @@ providers_available = []
 if os.environ.get("OPENAI_API_KEY"):
     try:
         import openai
+
         providers_available.append("openai")
     except ImportError:
         print("  openai package not installed — pip install openai")
@@ -43,6 +45,7 @@ if os.environ.get("OPENAI_API_KEY"):
 if os.environ.get("ANTHROPIC_API_KEY"):
     try:
         import anthropic
+
         providers_available.append("anthropic")
     except ImportError:
         print("  anthropic package not installed — pip install anthropic")
@@ -50,6 +53,7 @@ if os.environ.get("ANTHROPIC_API_KEY"):
 if os.environ.get("GOOGLE_API_KEY"):
     try:
         import google.generativeai as genai
+
         providers_available.append("gemini")
     except ImportError:
         print("  google-generativeai package not installed — pip install google-generativeai")
@@ -70,7 +74,6 @@ print(f"Providers available: {', '.join(providers_available)}\n")
 PROMPT = "Explain what a circuit breaker pattern is in distributed systems, in 2-3 sentences."
 
 with stateloom.session("quick-start-demo", budget=2.0) as s:
-
     # ── OpenAI ────────────────────────────────────────────────────────
     if "openai" in providers_available:
         print("── OpenAI ──")
@@ -123,7 +126,7 @@ with stateloom.session("quick-start-demo", budget=2.0) as s:
             print(f"    {model_name}: ${cost:.4f} ({tokens.get('total', 0)} tokens)")
     print()
     print(f"  Budget remaining: ${s.budget - s.total_cost:.4f} of ${s.budget:.2f}")
-    print(f"  Dashboard: http://localhost:4782")
+    print("  Dashboard: http://localhost:4782")
 
 
 # ── Bonus: unified Client (no SDK imports needed) ────────────────────
@@ -131,6 +134,7 @@ with stateloom.session("quick-start-demo", budget=2.0) as s:
 # Uncomment to try:
 #
 # with stateloom.session("unified-client-demo", budget=1.0) as s:
-#     response = stateloom.chat(model="gpt-4o-mini", messages=[{"role": "user", "content": "What is 2 + 2?"}])
+#     msg = [{"role": "user", "content": "What is 2 + 2?"}]
+#     response = stateloom.chat(model="gpt-4o-mini", messages=msg)
 #     print(response.content)
 #     print(f"Cost: ${s.total_cost:.4f}")

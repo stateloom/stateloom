@@ -26,7 +26,7 @@ Requires:
     pip install stateloom langchain langchain-openai
     # or: pip install stateloom langchain langchain-anthropic
     export OPENAI_API_KEY=sk-...
-    python examples/14_langchain_langgraph.py
+    python examples/langchain_langgraph.py
 """
 
 import os
@@ -85,7 +85,6 @@ print("=" * 60)
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-
 from stateloom.ext.langchain import StateLoomCallbackHandler
 
 # The callback handler adds LangChain metadata (tool names, run IDs)
@@ -94,10 +93,12 @@ handler = StateLoomCallbackHandler()
 
 llm = ChatModel(model=MODEL_NAME)
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a helpful assistant. Be concise."),
-    ("human", "{question}"),
-])
+prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", "You are a helpful assistant. Be concise."),
+        ("human", "{question}"),
+    ]
+)
 
 chain = prompt | llm | StrOutputParser()
 
@@ -129,14 +130,18 @@ print("=" * 60)
 print("A2. Multi-step chain — classify then respond")
 print("=" * 60)
 
-classify_prompt = ChatPromptTemplate.from_messages([
-    ("system", "Classify the question into: tech, science, or general. Reply with one word."),
-    ("human", "{question}"),
-])
-respond_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an expert in {category}. Answer concisely in 1-2 sentences."),
-    ("human", "{question}"),
-])
+classify_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", "Classify the question into: tech, science, or general. Reply with one word."),
+        ("human", "{question}"),
+    ]
+)
+respond_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", "You are an expert in {category}. Answer concisely in 1-2 sentences."),
+        ("human", "{question}"),
+    ]
+)
 
 classify_chain = classify_prompt | llm | StrOutputParser()
 respond_chain = respond_prompt | llm | StrOutputParser()
@@ -149,10 +154,14 @@ questions = [
 
 with stateloom.session("langchain-multistep-demo", budget=2.0) as s:
     for q in questions:
-        category = classify_chain.invoke(
-            {"question": q},
-            config={"callbacks": [handler]},
-        ).strip().lower()
+        category = (
+            classify_chain.invoke(
+                {"question": q},
+                config={"callbacks": [handler]},
+            )
+            .strip()
+            .lower()
+        )
         answer = respond_chain.invoke(
             {"question": q, "category": category},
             config={"callbacks": [handler]},
@@ -229,8 +238,15 @@ if _HAS_LANGGRAPH:
 
     with stateloom.session("langgraph-agent-demo", budget=2.0) as s:
         result = agent.invoke(
-            {"messages": [("human", "What is the current world population? "
-                          "Multiply it by 2 and tell me the result.")]},
+            {
+                "messages": [
+                    (
+                        "human",
+                        "What is the current world population? "
+                        "Multiply it by 2 and tell me the result.",
+                    )
+                ]
+            },
             config={"callbacks": [handler]},
         )
 
@@ -251,11 +267,18 @@ if _HAS_LANGGRAPH:
     try:
         with stateloom.session("langgraph-budget-demo", budget=0.001) as s:
             result = agent.invoke(
-                {"messages": [("human", "Research the top 5 programming languages, "
-                              "their market share, and calculate the total.")]},
+                {
+                    "messages": [
+                        (
+                            "human",
+                            "Research the top 5 programming languages, "
+                            "their market share, and calculate the total.",
+                        )
+                    ]
+                },
                 config={"callbacks": [handler]},
             )
-            print(f"  Completed (unlikely with $0.001 budget)")
+            print("  Completed (unlikely with $0.001 budget)")
     except stateloom.StateLoomBudgetError as e:
         print(f"  Budget enforced: {e}")
         print(f"  Agent stopped at ${s.total_cost:.4f} / ${s.budget:.4f}")

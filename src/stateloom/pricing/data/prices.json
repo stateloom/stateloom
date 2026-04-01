@@ -1,5 +1,5 @@
 {
-  "_comment": "Prices in USD per token. Updated 2025-05.",
+  "_comment": "Prices in USD per token. Updated 2026-04.",
   "models": {
     "gpt-4o": {
       "input": 0.0000025,
@@ -100,6 +100,46 @@
     "gemini-1.5-flash-8b": {
       "input": 0.0000000375,
       "output": 0.00000015
+    },
+    "mistral-small-latest": {
+      "input": 0.0000001,
+      "output": 0.0000003
+    },
+    "mistral-medium-latest": {
+      "input": 0.0000004,
+      "output": 0.000002
+    },
+    "mistral-large-latest": {
+      "input": 0.000002,
+      "output": 0.000006
+    },
+    "codestral-latest": {
+      "input": 0.0000003,
+      "output": 0.0000009
+    },
+    "pixtral-large-latest": {
+      "input": 0.000002,
+      "output": 0.000006
+    },
+    "open-mistral-nemo": {
+      "input": 0.00000015,
+      "output": 0.00000015
+    },
+    "command-a-03-2025": {
+      "input": 0.0000025,
+      "output": 0.00001
+    },
+    "command-r-plus": {
+      "input": 0.0000025,
+      "output": 0.00001
+    },
+    "command-r": {
+      "input": 0.00000015,
+      "output": 0.0000006
+    },
+    "command-r7b-12-2024": {
+      "input": 0.0000000375,
+      "output": 0.00000015
     }
   },
   "aliases": {
@@ -130,6 +170,14 @@
     "gemini-1.5-pro-001": "gemini-1.5-pro",
     "gemini-1.5-flash-002": "gemini-1.5-flash",
     "gemini-1.5-flash-001": "gemini-1.5-flash",
-    "gemini-1.5-flash-8b-001": "gemini-1.5-flash-8b"
+    "gemini-1.5-flash-8b-001": "gemini-1.5-flash-8b",
+    "mistral-small-2503": "mistral-small-latest",
+    "mistral-medium-2505": "mistral-medium-latest",
+    "mistral-large-2501": "mistral-large-latest",
+    "codestral-2501": "codestral-latest",
+    "pixtral-large-2411": "pixtral-large-latest",
+    "open-mistral-nemo-2407": "open-mistral-nemo",
+    "command-r-plus-08-2024": "command-r-plus",
+    "command-r-08-2024": "command-r"
   }
 }

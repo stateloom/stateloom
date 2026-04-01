@@ -4,27 +4,25 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
 from stateloom.security.vault import SecretVault
 
 
 def test_store_and_retrieve():
     vault = SecretVault()
-    vault.configure(enabled=True)
+    vault.configure(enabled=True, keys=[])
     vault.store("MY_KEY", "secret123")
     assert vault.retrieve("MY_KEY") == "secret123"
 
 
 def test_retrieve_missing():
     vault = SecretVault()
-    vault.configure(enabled=True)
+    vault.configure(enabled=True, keys=[])
     assert vault.retrieve("NONEXISTENT") is None
 
 
 def test_has():
     vault = SecretVault()
-    vault.configure(enabled=True)
+    vault.configure(enabled=True, keys=[])
     assert not vault.has("K")
     vault.store("K", "v")
     assert vault.has("K")
@@ -32,7 +30,7 @@ def test_has():
 
 def test_list_keys():
     vault = SecretVault()
-    vault.configure(enabled=True)
+    vault.configure(enabled=True, keys=[])
     vault.store("B_KEY", "b")
     vault.store("A_KEY", "a")
     assert vault.list_keys() == ["A_KEY", "B_KEY"]
@@ -40,7 +38,7 @@ def test_list_keys():
 
 def test_remove():
     vault = SecretVault()
-    vault.configure(enabled=True)
+    vault.configure(enabled=True, keys=[])
     vault.store("K", "v")
     assert vault.remove("K") is True
     assert vault.has("K") is False
@@ -76,7 +74,7 @@ def test_restore_environ(monkeypatch):
 
 def test_get_status():
     vault = SecretVault()
-    vault.configure(enabled=True)
+    vault.configure(enabled=True, keys=[])
     vault.store("KEY1", "val1")
     status = vault.get_status()
     assert status["enabled"] is True

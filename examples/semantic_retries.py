@@ -12,15 +12,16 @@ Demonstrates:
 Run:
 
     export OPENAI_API_KEY=sk-...
-    python examples/09_semantic_retries.py
+    python examples/semantic_retries.py
 
     # or with Anthropic / Gemini
     export ANTHROPIC_API_KEY=sk-ant-...
-    python examples/09_semantic_retries.py
+    python examples/semantic_retries.py
 """
 
 import json
 import os
+
 import stateloom
 
 # ── Init ──────────────────────────────────────────────────────────────
@@ -36,16 +37,19 @@ if os.environ.get("OPENAI_API_KEY"):
     PROVIDER = "openai"
     MODEL = "gpt-4o-mini"
     import openai
+
     sdk_client = openai.OpenAI()
 elif os.environ.get("ANTHROPIC_API_KEY"):
     PROVIDER = "anthropic"
     MODEL = "claude-haiku-4-5-20251001"
     import anthropic
+
     sdk_client = anthropic.Anthropic()
 elif os.environ.get("GOOGLE_API_KEY"):
     PROVIDER = "gemini"
     MODEL = "gemini-2.5-flash"
     import google.generativeai as genai
+
     sdk_client = genai.GenerativeModel(MODEL)
 else:
     print("Set at least one API key: OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY")
@@ -64,7 +68,11 @@ def sdk_chat(prompt: str, system: str | None = None) -> str:
         resp = sdk_client.chat.completions.create(model=MODEL, messages=messages)
         return resp.choices[0].message.content
     elif PROVIDER == "anthropic":
-        kwargs = {"model": MODEL, "max_tokens": 512, "messages": [{"role": "user", "content": prompt}]}
+        kwargs = {
+            "model": MODEL,
+            "max_tokens": 512,
+            "messages": [{"role": "user", "content": prompt}],
+        }
         if system:
             kwargs["system"] = system
         resp = sdk_client.messages.create(**kwargs)
@@ -97,8 +105,16 @@ with stateloom.session("retry-json-demo", budget=2.0) as s:
             response = stateloom.chat(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a JSON API. Return ONLY valid JSON, no markdown."},
-                    {"role": "user", "content": 'Return {"name": "Python", "paradigm": "multi-paradigm", "year": 1991}'},
+                    {
+                        "role": "system",
+                        "content": "You are a JSON API. Return ONLY valid JSON, no markdown.",
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            'Return {"name": "Python", "paradigm": "multi-paradigm", "year": 1991}'
+                        ),
+                    },
                 ],
             )
             text = strip_markdown_json(response.content)
@@ -132,7 +148,7 @@ with stateloom.session("retry-callback-demo", budget=2.0) as s:
     for attempt in stateloom.retry_loop(retries=3, on_retry=on_retry):
         with attempt:
             text = sdk_chat(
-                'Return a JSON array of exactly 3 programming languages with '
+                "Return a JSON array of exactly 3 programming languages with "
                 'keys "name" and "creator". Example: [{"name": "C", "creator": "Ritchie"}]',
                 system="You are a JSON API. Return ONLY valid JSON, no markdown.",
             )
@@ -162,7 +178,8 @@ def validate_has_three_items(data: dict) -> bool:
     concepts = data.get("key_concepts", [])
     ok = isinstance(concepts, list) and len(concepts) == 3
     if not ok:
-        print(f"    [validate] Expected 3 concepts, got {len(concepts) if isinstance(concepts, list) else 'non-list'}")
+        count = len(concepts) if isinstance(concepts, list) else "non-list"
+        print(f"    [validate] Expected 3 concepts, got {count}")
     return ok
 
 
@@ -173,10 +190,17 @@ with stateloom.session("retry-validate-demo", budget=2.0) as s:
             response = stateloom.chat(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a JSON API. Return ONLY valid JSON, no markdown."},
+                    {
+                        "role": "system",
+                        "content": "You are a JSON API. Return ONLY valid JSON, no markdown.",
+                    },
                     {
                         "role": "user",
-                        "content": 'Return {"topic": "databases", "key_concepts": ["indexing", "normalization", "ACID"]}',
+                        "content": (
+                            'Return {"topic": "databases",'
+                            ' "key_concepts": ["indexing",'
+                            ' "normalization", "ACID"]}'
+                        ),
                     },
                 ],
             )
@@ -184,7 +208,7 @@ with stateloom.session("retry-validate-demo", budget=2.0) as s:
             result = json.loads(text)
             assert "topic" in result
             if not validate_has_three_items(result):
-                raise ValueError(f"Validation failed: expected 3 concepts")
+                raise ValueError("Validation failed: expected 3 concepts")
 
     print(f"  Result: {result}")
     print(f"  Calls: {s.call_count} | Cost: ${s.total_cost:.6f}")
@@ -207,7 +231,10 @@ def extract_tech_stack(company: str) -> dict:
     response = stateloom.chat(
         model=MODEL,
         messages=[
-            {"role": "system", "content": "You are a JSON API. Return ONLY valid JSON, no markdown."},
+            {
+                "role": "system",
+                "content": "You are a JSON API. Return ONLY valid JSON, no markdown.",
+            },
             {
                 "role": "user",
                 "content": f'Return a JSON object with "company", "languages" (list of 3), '
@@ -227,7 +254,7 @@ try:
     print(f"  Company: {facts.get('company', 'N/A')}")
     print(f"  Languages: {', '.join(facts.get('languages', []))}")
     print(f"  Cloud: {facts.get('cloud_provider', 'N/A')}")
-    print(f"  (Durable — run again to see instant replay)")
+    print("  (Durable — run again to see instant replay)")
 except stateloom.StateLoomRetryError as e:
     print(f"  All retries exhausted: {e}")
 
@@ -300,9 +327,9 @@ with stateloom.session("retry-budget-demo", budget=0.0001) as s:
                 print(f"  Response: {response.content[:50]}")
     except stateloom.StateLoomBudgetError as e:
         print(f"  Budget error propagated immediately (not retried): {e}")
-    except Exception as e:
+    except Exception:
         # Budget may not trigger if the call is cheap enough
         print(f"  Call succeeded (budget not exceeded): cost ${s.total_cost:.6f}")
 
 print()
-print(f"Dashboard: http://localhost:4782")
+print("Dashboard: http://localhost:4782")

@@ -18,16 +18,12 @@ _DEFAULT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "uuid",
         re.compile(
-            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
-            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}" r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
         ),
     ),
     (
         "iso_ts",
-        re.compile(
-            r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
-            r"(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b"
-        ),
+        re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}" r"(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b"),
     ),
     ("unix_ts", re.compile(r"\b1[6-9]\d{8}(?:\d{3})?\b")),
     (

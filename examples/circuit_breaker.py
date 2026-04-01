@@ -26,7 +26,7 @@ Requires:
     # or
     export GOOGLE_API_KEY=AIza...
 
-    python examples/17_circuit_breaker.py
+    python examples/circuit_breaker.py
 """
 
 import os
@@ -97,7 +97,7 @@ for provider, info in status.get("providers", {}).items():
     if info.get("failure_count", 0) > 0:
         print(f"  {provider}: {info['state']} ({info['failure_count']} failures)")
     else:
-        print(f"  All circuits: closed (healthy)")
+        print("  All circuits: closed (healthy)")
         break
 
 print()

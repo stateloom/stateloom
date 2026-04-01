@@ -24,6 +24,7 @@ class PatchTarget:
     method_name: str
     is_async: bool = False
     description: str = ""
+    always_streaming: bool = False
 
 
 @dataclass

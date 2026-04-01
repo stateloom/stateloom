@@ -22,7 +22,7 @@ Requires at least one provider API key:
     export ANTHROPIC_API_KEY=sk-ant-...
     export GOOGLE_API_KEY=AIza...
 
-    python examples/13_kill_switch.py
+    python examples/kill_switch.py
 """
 
 import os

@@ -27,7 +27,7 @@ Requires at least ONE provider API key:
     export OPENAI_API_KEY=sk-...
     export GOOGLE_API_KEY=AIza...
 
-    python examples/12_experiments.py
+    python examples/experiments.py
 """
 
 import json
@@ -243,7 +243,9 @@ for i, query in enumerate(CUSTOMER_QUERIES):
     results.append(result)
 
     # Record feedback based on the quality score
-    rating = "success" if result["score"] >= 4 else ("partial" if result["score"] >= 3 else "failure")
+    rating = (
+        "success" if result["score"] >= 4 else ("partial" if result["score"] >= 3 else "failure")
+    )
     stateloom.feedback(
         session_id=session_id,
         rating=rating,
@@ -329,9 +331,7 @@ temp_experiment = stateloom.create_experiment(
             "weight": 4.0,  # 80% traffic
             "model": models[0],
             "request_overrides": {
-                "system_prompt": (
-                    "You are a customer support agent. Be helpful and professional."
-                ),
+                "system_prompt": ("You are a customer support agent. Be helpful and professional."),
                 "temperature": 0.2,
                 "max_tokens": 200,
             },
@@ -341,9 +341,7 @@ temp_experiment = stateloom.create_experiment(
             "weight": 1.0,  # 20% traffic
             "model": models[0],
             "request_overrides": {
-                "system_prompt": (
-                    "You are a customer support agent. Be helpful and professional."
-                ),
+                "system_prompt": ("You are a customer support agent. Be helpful and professional."),
                 "temperature": 0.9,
                 "max_tokens": 200,
             },
@@ -356,7 +354,7 @@ temp_experiment = stateloom.create_experiment(
 temp_experiment = stateloom.start_experiment(temp_experiment.id)
 print(f"  Experiment: {temp_experiment.name}")
 print(f"  ID: {temp_experiment.id}")
-print(f"  Strategy: random (80/20 weighted)")
+print("  Strategy: random (80/20 weighted)")
 print()
 
 # Run a batch of sessions
@@ -415,7 +413,9 @@ for variant_name, scores in temp_results.items():
 
 temp_metrics = stateloom.experiment_metrics(temp_experiment.id)
 for vname, stats in temp_metrics.get("variants", {}).items():
-    print(f"  {vname}: success_rate={stats.get('success_rate', 0):.1%}, avg_cost=${stats.get('avg_cost', 0):.6f}")
+    rate = stats.get("success_rate", 0)
+    avg = stats.get("avg_cost", 0)
+    print(f"  {vname}: success_rate={rate:.1%}, avg_cost=${avg:.6f}")
 
 stateloom.conclude_experiment(temp_experiment.id)
 print(f"\n  Experiment concluded: {temp_experiment.status.value}")
@@ -438,4 +438,4 @@ for i, entry in enumerate(board, 1):
     )
 
 print()
-print(f"Dashboard: http://localhost:4782")
+print("Dashboard: http://localhost:4782")

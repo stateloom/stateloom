@@ -20,7 +20,7 @@ Standard AI gateways operate at the **LLM call level** — they see each API req
 
 StateLoom is **session-aware**. It understands that those 50 calls belong to one agent run, so you can set a $2 budget on the whole task (not per-request), catch an agent spinning in a loop before it burns through your credits, detect PII once and block it for the entire session, and replay a failed run from any step — not just retry the last call.
 
-One line of code. No SDK lock-in. Your existing OpenAI/Anthropic/Gemini code works unchanged.
+One line of code. No SDK lock-in. Your existing OpenAI/Anthropic/Gemini/Cohere/Mistral code works unchanged.
 
 ---
 
@@ -139,12 +139,15 @@ claude "summarize the PR"
 
 Auto-detects and patches installed LLM clients:
 
-| Provider | Package | Auto-patched |
-|----------|---------|:------------:|
-| OpenAI | `openai` | Yes |
-| Anthropic | `anthropic` | Yes |
-| Google Gemini | `google-generativeai` | Yes |
-| Ollama (local) | — | Via `local_model=` |
+| Provider | Package | Auto-patched | Streaming |
+|----------|---------|:------------:|:---------:|
+| OpenAI | `openai` | Yes | `stream=True` |
+| Anthropic | `anthropic` | Yes | `stream=True` |
+| Google Gemini | `google-generativeai` or `google-genai` | Yes | `generate_content_stream()` |
+| Cohere | `cohere` | Yes | `chat_stream()` |
+| Mistral | `mistralai` | Yes | `chat.stream()` |
+| LiteLLM | `litellm` | Yes | `stream=True` |
+| Ollama (local) | — | Via `local_model=` | — |
 
 ## For Individual Developers (Free & Open Source)
 

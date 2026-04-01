@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stateloom.core.types import Provider
+
+if TYPE_CHECKING:
+    from stateloom.middleware.base import StreamChunkInfo
 from stateloom.intercept.provider_adapter import BaseProviderAdapter, PatchTarget, TokenFieldMap
 
 _TOKEN_FIELDS = TokenFieldMap(
@@ -51,6 +54,20 @@ class CohereAdapter(BaseProviderAdapter):
                 is_async=True,
                 description="cohere.AsyncV2Client.chat",
             ),
+            PatchTarget(
+                target_class=V2Client,
+                method_name="chat_stream",
+                is_async=False,
+                description="cohere.V2Client.chat_stream",
+                always_streaming=True,
+            ),
+            PatchTarget(
+                target_class=AsyncV2Client,
+                method_name="chat_stream",
+                is_async=True,
+                description="cohere.AsyncV2Client.chat_stream",
+                always_streaming=True,
+            ),
         ]
 
     def extract_tokens(self, response: Any) -> tuple[int, int, int]:
@@ -66,6 +83,40 @@ class CohereAdapter(BaseProviderAdapter):
         except AttributeError:
             pass
         return accumulated
+
+    def extract_chunk_info(self, chunk: Any) -> StreamChunkInfo:
+        from stateloom.middleware.base import StreamChunkInfo
+
+        info = StreamChunkInfo()
+        try:
+            if hasattr(chunk, "type") and chunk.type == "content-delta":
+                delta = chunk.delta
+                if hasattr(delta, "message") and delta.message:
+                    content = delta.message.content
+                    if content and hasattr(content, "text") and content.text:
+                        info.text_delta = content.text
+            elif hasattr(chunk, "type") and chunk.type == "message-end":
+                delta = chunk.delta
+                if hasattr(delta, "finish_reason"):
+                    info.finish_reason = str(delta.finish_reason)
+                if hasattr(delta, "usage") and delta.usage:
+                    tokens = getattr(delta.usage, "tokens", None)
+                    if tokens:
+                        info.prompt_tokens = int(tokens.input_tokens or 0)
+                        info.completion_tokens = int(tokens.output_tokens or 0)
+                        info.has_usage = True
+        except (AttributeError, TypeError):
+            pass
+        return info
+
+    def modify_chunk_text(self, chunk: Any, new_text: str) -> Any:
+        try:
+            if hasattr(chunk, "type") and chunk.type == "content-delta":
+                if chunk.delta and chunk.delta.message and chunk.delta.message.content:
+                    chunk.delta.message.content.text = new_text
+        except (AttributeError, TypeError):
+            pass
+        return chunk
 
     def extract_content(self, response: Any) -> str:
         try:
@@ -127,9 +178,9 @@ class CohereAdapter(BaseProviderAdapter):
         # Check if it's a V2 client or has .v2 accessor
         client_type = type(client).__name__
         if "V2" in client_type:
-            return [(client, "chat")]
+            return [(client, "chat"), (client, "chat_stream")]
         if hasattr(client, "v2"):
-            return [(client.v2, "chat")]
+            return [(client.v2, "chat"), (client.v2, "chat_stream")]
         return []
 
     @property

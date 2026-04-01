@@ -11,14 +11,15 @@ Demonstrates:
 Run:
 
     export OPENAI_API_KEY=sk-...
-    python examples/03_sessions_and_budget.py
+    python examples/sessions_and_budget.py
 
     # or with Anthropic
     export ANTHROPIC_API_KEY=sk-ant-...
-    python examples/03_sessions_and_budget.py
+    python examples/sessions_and_budget.py
 """
 
 import os
+
 import stateloom
 
 # ── Init ──────────────────────────────────────────────────────────────
@@ -154,4 +155,4 @@ with stateloom.session("multi-call-session", budget=1.0) as s:
             tokens = s.tokens_by_model.get(model_name, {})
             print(f"  {model_name}: ${cost:.4f} ({tokens.get('total', 0)} tokens)")
 
-print(f"\nDashboard: http://localhost:4782")
+print("\nDashboard: http://localhost:4782")

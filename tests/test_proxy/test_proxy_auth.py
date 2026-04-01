@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import unittest.mock
 from unittest.mock import MagicMock, patch
 
 from stateloom.proxy.auth import ProxyAuth
@@ -147,5 +149,14 @@ class TestProxyAuthProviderKeys:
 
         auth = ProxyAuth(gate)
         _, vk = _make_vk(org_id="org-1")
-        keys = auth.get_provider_keys(vk)
+        env_patch = {
+            "OPENAI_API_KEY": "",
+            "ANTHROPIC_API_KEY": "",
+            "GOOGLE_API_KEY": "",
+        }
+        with unittest.mock.patch.dict(os.environ, env_patch, clear=False):
+            # Remove the keys entirely so env fallback returns nothing
+            for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
+                os.environ.pop(k, None)
+            keys = auth.get_provider_keys(vk)
         assert len(keys) == 0

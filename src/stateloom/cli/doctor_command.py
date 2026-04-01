@@ -29,7 +29,8 @@ def _run_checks(port: int) -> list[dict[str, str]]:
     # SDK checks
     results.append(_check_sdk("openai", "OpenAI SDK"))
     results.append(_check_sdk("anthropic", "Anthropic SDK"))
-    results.append(_check_sdk("google.generativeai", "Gemini SDK"))
+    results.append(_check_sdk("google.generativeai", "Gemini SDK (google-generativeai)"))
+    results.append(_check_sdk("google.genai", "Gemini SDK (google-genai)"))
     results.append(_check_sdk("mistralai", "Mistral SDK"))
     results.append(_check_sdk("cohere", "Cohere SDK"))
     results.append(_check_sdk("litellm", "LiteLLM SDK"))

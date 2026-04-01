@@ -30,6 +30,17 @@ def auto_patch(gate: Gate) -> list[dict[str, Any]]:
         for desc in results:
             patched.append({"provider": name, "description": desc})
 
+    # google-genai uses per-client classes — patch separately to avoid
+    # overwriting the legacy google-generativeai GeminiAdapter.
+    try:
+        from stateloom.intercept.adapters.genai_adapter import patch_genai
+
+        results = patch_genai(gate)
+        for desc in results:
+            patched.append({"provider": Provider.GEMINI, "description": desc})
+    except Exception:
+        pass  # google-genai not installed or patch failed
+
     # LiteLLM uses module-level functions — patch separately
     try:
         from stateloom.intercept.adapters.litellm_adapter import patch_litellm
@@ -48,7 +59,7 @@ def auto_patch(gate: Gate) -> list[dict[str, Any]]:
     else:
         logger.warning(
             "[StateLoom] No LLM clients found to patch. "
-            "Install openai, anthropic, google-generativeai, mistralai, "
+            "Install openai, anthropic, google-generativeai, google-genai, mistralai, "
             "cohere, or litellm, "
             "or use gate.wrap() or stateloom.register_provider() for custom providers."
         )

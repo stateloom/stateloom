@@ -55,6 +55,7 @@ migrations = ["alembic>=1.13", "sqlalchemy>=2.0"]
 mistral = ["mistralai>=1.0"]
 cohere = ["cohere>=5.0"]
 litellm = ["litellm>=1.40"]
+genai = ["google-genai>=1.0"]
 all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]"]
 dev = [
     "pytest>=7.0",
@@ -95,6 +96,9 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.10"

@@ -23,10 +23,11 @@ Requires API keys for at least TWO providers:
     export GOOGLE_API_KEY=AIza...
     export OPENAI_API_KEY=sk-...       # optional third model
 
-    python examples/11_agents_and_consensus.py
+    python examples/agents_and_consensus.py
 """
 
 import os
+
 import stateloom
 
 # ── Init ──────────────────────────────────────────────────────────────
@@ -71,7 +72,6 @@ print("=" * 60)
 
 agent = stateloom.create_agent(
     slug="tech-advisor",
-
     name="Tech Advisor",
     description="Senior staff engineer that gives opinionated architecture advice",
     model=models[0],
@@ -104,17 +104,24 @@ print("=" * 60)
 with stateloom.session("agent-chat-demo", budget=2.0) as s:
     r1 = stateloom.chat(
         agent="tech-advisor",
-        messages=[{"role": "user", "content": "Should I use Redis or Memcached for session storage?"}],
+        messages=[
+            {"role": "user", "content": "Should I use Redis or Memcached for session storage?"}
+        ],
     )
-    print(f"  Q: Should I use Redis or Memcached for session storage?")
+    print("  Q: Should I use Redis or Memcached for session storage?")
     print(f"  A: {r1.content[:150]}")
     print()
 
     r2 = stateloom.chat(
         agent="tech-advisor",
-        messages=[{"role": "user", "content": "Kafka vs RabbitMQ for an event-driven microservices system?"}],
+        messages=[
+            {
+                "role": "user",
+                "content": "Kafka vs RabbitMQ for an event-driven microservices system?",
+            }
+        ],
     )
-    print(f"  Q: Kafka vs RabbitMQ for event-driven microservices?")
+    print("  Q: Kafka vs RabbitMQ for event-driven microservices?")
     print(f"  A: {r2.content[:150]}")
 
 print(f"\n  Session: ${s.total_cost:.6f} | {s.call_count} calls | {s.total_tokens} tokens")
@@ -154,7 +161,7 @@ r3 = stateloom.chat(
     agent="tech-advisor",
     messages=[{"role": "user", "content": "Monorepo or polyrepo for a 10-person startup?"}],
 )
-print(f"  Q: Monorepo or polyrepo for a 10-person startup?")
+print("  Q: Monorepo or polyrepo for a 10-person startup?")
 print(f"  A (v2): {r3.content[:150]}")
 print()
 
@@ -178,7 +185,7 @@ r4 = stateloom.chat(
     agent="tech-advisor",
     messages=[{"role": "user", "content": "gRPC or REST for internal service communication?"}],
 )
-print(f"  Q: gRPC or REST for internal services?")
+print("  Q: gRPC or REST for internal services?")
 print(f"  A (v1): {r4.content[:150]}")
 
 # Re-activate v2 for subsequent sections
@@ -196,7 +203,6 @@ print("=" * 60)
 
 reviewer = stateloom.create_agent(
     slug="code-reviewer",
-
     name="Code Reviewer",
     description="Senior code reviewer focused on correctness and maintainability",
     model=models[-1],
@@ -213,10 +219,12 @@ print(f"  Model: {models[-1]}")
 
 r5 = stateloom.chat(
     agent="code-reviewer",
-    messages=[{
-        "role": "user",
-        "content": "Review this: `def div(a, b): return a / b`",
-    }],
+    messages=[
+        {
+            "role": "user",
+            "content": "Review this: `def div(a, b): return a / b`",
+        }
+    ],
 )
 print(f"  Review: {r5.content[:150]}")
 print()
@@ -252,7 +260,7 @@ print("=" * 60)
 
 result = stateloom.consensus_sync(
     prompt="Is Rust or Go a better choice for a high-throughput web API? "
-           "Give a clear recommendation with one key reason.",
+    "Give a clear recommendation with one key reason.",
     models=models,
     strategy="vote",
     budget=1.0,
@@ -270,8 +278,8 @@ print("=" * 60)
 
 result = stateloom.consensus_sync(
     prompt="A startup is choosing between PostgreSQL and DynamoDB for their "
-           "e-commerce platform that handles flash sales (100x traffic spikes). "
-           "Small team, strong SQL experience. What should they pick and why?",
+    "e-commerce platform that handles flash sales (100x traffic spikes). "
+    "Small team, strong SQL experience. What should they pick and why?",
     models=models,
     strategy="debate",
     rounds=2,
@@ -291,7 +299,7 @@ print("=" * 60)
 
 result = stateloom.consensus_sync(
     prompt="A farmer has 17 sheep. All but 9 run away. How many sheep "
-           "does the farmer have left? Think step by step.",
+    "does the farmer have left? Think step by step.",
     models=[models[0]],
     strategy="self_consistency",
     samples=3,
@@ -311,7 +319,7 @@ print("=" * 60)
 
 result = stateloom.consensus_sync(
     prompt="What is the time complexity of binary search? "
-           "State the answer and briefly explain why.",
+    "State the answer and briefly explain why.",
     models=models,
     strategy="debate",
     rounds=2,
@@ -334,8 +342,8 @@ print("=" * 60)
 
 result = stateloom.consensus_sync(
     prompt="Our team is debating whether to adopt GraphQL or stick with REST "
-           "for our public API. We have 50+ third-party integrations. "
-           "What's your recommendation?",
+    "for our public API. We have 50+ third-party integrations. "
+    "What's your recommendation?",
     models=models,
     strategy="debate",
     rounds=2,
@@ -343,7 +351,7 @@ result = stateloom.consensus_sync(
     agent="tech-advisor",
 )
 
-print(f"  Agent persona: tech-advisor (v2)")
+print("  Agent persona: tech-advisor (v2)")
 print_result(result)
 print()
 
@@ -361,11 +369,13 @@ with stateloom.session("full-pipeline-demo", budget=5.0) as s:
     print("  Step 1: Tech advisor gathers context...")
     context = stateloom.chat(
         agent="tech-advisor",
-        messages=[{
-            "role": "user",
-            "content": "List 3 key factors when choosing between microservices "
-                       "and monolith. One line each, no explanation.",
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": "List 3 key factors when choosing between microservices "
+                "and monolith. One line each, no explanation.",
+            }
+        ],
     )
     print(f"    {context.content[:120]}")
 
@@ -373,12 +383,14 @@ with stateloom.session("full-pipeline-demo", budget=5.0) as s:
     print("\n  Step 2: Code reviewer adds perspective...")
     review = stateloom.chat(
         agent="code-reviewer",
-        messages=[{
-            "role": "user",
-            "content": f"From a code quality perspective, which architecture "
-                       f"is easier to maintain for a 5-person team? "
-                       f"Context: {context.content[:200]}",
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": f"From a code quality perspective, which architecture "
+                f"is easier to maintain for a 5-person team? "
+                f"Context: {context.content[:200]}",
+            }
+        ],
     )
     print(f"    {review.content[:120]}")
 
@@ -386,10 +398,10 @@ with stateloom.session("full-pipeline-demo", budget=5.0) as s:
     print("\n  Step 3: Cross-provider consensus on the decision...")
     result = stateloom.consensus_sync(
         prompt=f"Given this analysis:\n"
-               f"- Tech advisor: {context.content[:200]}\n"
-               f"- Code reviewer: {review.content[:200]}\n\n"
-               "A 5-person startup building B2B SaaS with 100 customers. "
-               "Monolith or microservices? Give a clear, final recommendation.",
+        f"- Tech advisor: {context.content[:200]}\n"
+        f"- Code reviewer: {review.content[:200]}\n\n"
+        "A 5-person startup building B2B SaaS with 100 customers. "
+        "Monolith or microservices? Give a clear, final recommendation.",
         models=models,
         strategy="debate",
         rounds=2,
@@ -403,7 +415,10 @@ with stateloom.session("full-pipeline-demo", budget=5.0) as s:
     summary = stateloom.chat(
         model=models[-1],
         messages=[
-            {"role": "system", "content": "Explain technical decisions to a CEO. Two sentences max."},
+            {
+                "role": "system",
+                "content": "Explain technical decisions to a CEO. Two sentences max.",
+            },
             {"role": "user", "content": f"Summarize: {result.answer[:300]}"},
         ],
     )
@@ -412,4 +427,4 @@ with stateloom.session("full-pipeline-demo", budget=5.0) as s:
 print(f"\n  Session total: ${s.total_cost:.6f} | {s.call_count} calls | {s.total_tokens} tokens")
 
 print()
-print(f"Dashboard: http://localhost:4782")
+print("Dashboard: http://localhost:4782")

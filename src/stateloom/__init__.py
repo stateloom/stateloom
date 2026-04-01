@@ -5,7 +5,7 @@ loop detection, budget enforcement, time-travel debugging.
 
 Usage:
     import stateloom
-    stateloom.init()  # zero-config, auto-patches OpenAI/Anthropic
+    stateloom.init()  # zero-config, auto-patches OpenAI/Anthropic/Gemini
 """
 
 from __future__ import annotations

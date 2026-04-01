@@ -14,6 +14,7 @@ from stateloom import init, session, chat, Client, StateLoomError
 - [Initialization & Lifecycle](#initialization--lifecycle) — `init()`, `get_gate()`, `shutdown()`, `register_provider()`, `wrap()`
 - [Sessions](#sessions) — `session()`, `async_session()`, `cancel_session()`, `checkpoint()`, `export_session()`, `import_session()`
 - [Unified Chat](#unified-chat) — `chat()`, `achat()`, `Client`, `ChatResponse`
+- [Provider Examples](#provider-examples) — OpenAI, Anthropic, Gemini, Cohere, Mistral, LiteLLM
 - [Tool Tracking](#tool-tracking) — `@tool()`
 - [Experiments](#experiments) — `create_experiment()`, `start_experiment()`, `feedback()`, `leaderboard()`, `backtest()`
 - [Consensus](#consensus-multi-agent-debate) — `consensus()`, `consensus_sync()`, `ConsensusResult`
@@ -49,7 +50,7 @@ Initialize StateLoom. This is the main entry point — call once at application 
 ```python
 import stateloom
 
-# Zero-config — auto-patches OpenAI/Anthropic/Gemini, starts dashboard
+# Zero-config — auto-patches OpenAI/Anthropic/Gemini/Cohere/Mistral/LiteLLM, starts dashboard
 stateloom.init()
 
 # With options
@@ -439,6 +440,295 @@ Response wrapper returned by `chat()`, `achat()`, `Client.chat()`, and `Client.a
 | `completion_tokens` | `int` | Output token count |
 | `session_id` | `str` | Session ID |
 | `events` | `list[str]` | Event types recorded (e.g. `["llm_call", "cost_tracking"]`) |
+
+---
+
+## Provider Examples
+
+StateLoom auto-patches all supported provider SDKs so native calls flow through the middleware pipeline with zero code changes. Below are examples for each provider showing both regular and streaming usage.
+
+### OpenAI
+
+```python
+import stateloom
+import openai
+
+stateloom.init()
+
+client = openai.OpenAI()
+
+# Regular
+with stateloom.session("openai-demo") as s:
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Hello!"}],
+    )
+    print(response.choices[0].message.content)
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Streaming
+with stateloom.session("openai-stream") as s:
+    stream = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Write a haiku."}],
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            print(delta, end="", flush=True)
+    print()
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Async
+import asyncio
+
+async def main():
+    aclient = openai.AsyncOpenAI()
+    async with stateloom.async_session("openai-async") as s:
+        response = await aclient.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Hello!"}],
+        )
+        print(response.choices[0].message.content)
+
+asyncio.run(main())
+```
+
+---
+
+### Anthropic
+
+```python
+import stateloom
+import anthropic
+
+stateloom.init()
+
+client = anthropic.Anthropic()
+
+# Regular
+with stateloom.session("anthropic-demo") as s:
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": "Hello!"}],
+    )
+    print(response.content[0].text)
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Streaming
+with stateloom.session("anthropic-stream") as s:
+    with client.messages.stream(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": "Write a haiku."}],
+    ) as stream:
+        for text in stream.text_stream:
+            print(text, end="", flush=True)
+    print()
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Async
+import asyncio
+
+async def main():
+    aclient = anthropic.AsyncAnthropic()
+    async with stateloom.async_session("anthropic-async") as s:
+        response = await aclient.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": "Hello!"}],
+        )
+        print(response.content[0].text)
+
+asyncio.run(main())
+```
+
+---
+
+### Gemini (google-genai — new SDK)
+
+```python
+import stateloom
+from google import genai
+
+stateloom.init()
+
+client = genai.Client()
+
+# Regular
+with stateloom.session("genai-demo") as s:
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents="Hello!",
+    )
+    print(response.text)
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Streaming
+with stateloom.session("genai-stream") as s:
+    stream = client.models.generate_content_stream(
+        model="gemini-2.5-flash",
+        contents="Write a haiku.",
+    )
+    for chunk in stream:
+        print(chunk.text, end="", flush=True)
+    print()
+    print(f"Cost: ${s.total_cost:.6f}")
+```
+
+---
+
+### Gemini (google-generativeai — legacy SDK)
+
+```python
+import stateloom
+import google.generativeai as genai
+
+stateloom.init()
+
+model = genai.GenerativeModel("gemini-1.5-flash")
+
+# Regular
+with stateloom.session("gemini-legacy") as s:
+    response = model.generate_content("Hello!")
+    print(response.text)
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Streaming
+with stateloom.session("gemini-legacy-stream") as s:
+    stream = model.generate_content("Write a haiku.", stream=True)
+    for chunk in stream:
+        print(chunk.text, end="", flush=True)
+    print()
+    print(f"Cost: ${s.total_cost:.6f}")
+```
+
+---
+
+### Cohere
+
+```python
+import os
+import stateloom
+import cohere
+
+stateloom.init()
+
+client = cohere.ClientV2(api_key=os.environ["CO_API_KEY"])
+
+# Regular
+with stateloom.session("cohere-demo") as s:
+    response = client.chat(
+        model="command-a-03-2025",
+        messages=[{"role": "user", "content": "Hello!"}],
+    )
+    print(response.message.content[0].text)
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Streaming via chat_stream()
+with stateloom.session("cohere-stream") as s:
+    stream = client.chat_stream(
+        model="command-a-03-2025",
+        messages=[{"role": "user", "content": "Write a haiku."}],
+    )
+    for event in stream:
+        if hasattr(event, "delta") and hasattr(event.delta, "message"):
+            if event.delta.message and event.delta.message.content:
+                text = event.delta.message.content.text
+                if text:
+                    print(text, end="", flush=True)
+    print()
+    print(f"Cost: ${s.total_cost:.6f}")
+```
+
+---
+
+### Mistral
+
+```python
+import os
+import stateloom
+
+stateloom.init()
+
+try:
+    from mistralai.client import Mistral
+except ImportError:
+    from mistralai import Mistral
+
+client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
+
+# Regular
+with stateloom.session("mistral-demo") as s:
+    response = client.chat.complete(
+        model="mistral-medium-latest",
+        messages=[{"role": "user", "content": "Hello!"}],
+    )
+    print(response.choices[0].message.content)
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Streaming via chat.stream()
+with stateloom.session("mistral-stream") as s:
+    stream = client.chat.stream(
+        model="mistral-medium-latest",
+        messages=[{"role": "user", "content": "Write a haiku."}],
+    )
+    for event in stream:
+        delta = event.data.choices[0].delta.content
+        if delta:
+            print(delta, end="", flush=True)
+    print()
+    print(f"Cost: ${s.total_cost:.6f}")
+```
+
+---
+
+### LiteLLM
+
+```python
+import stateloom
+import litellm
+
+stateloom.init()
+
+# Regular — any LiteLLM-supported model
+with stateloom.session("litellm-demo") as s:
+    response = litellm.completion(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Hello!"}],
+    )
+    print(response.choices[0].message.content)
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Streaming
+with stateloom.session("litellm-stream") as s:
+    stream = litellm.completion(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Write a haiku."}],
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            print(delta, end="", flush=True)
+    print()
+    print(f"Cost: ${s.total_cost:.6f}")
+
+# Async
+import asyncio
+
+async def main():
+    async with stateloom.async_session("litellm-async") as s:
+        response = await litellm.acompletion(
+            model="claude-sonnet-4-20250514",
+            messages=[{"role": "user", "content": "Hello!"}],
+        )
+        print(response.choices[0].message.content)
+
+asyncio.run(main())
+```
 
 ---
 
