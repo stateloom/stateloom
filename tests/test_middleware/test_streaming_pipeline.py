@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from stateloom.core.config import StateLoomConfig
 from stateloom.core.errors import (
     StateLoomBudgetError,
@@ -780,7 +779,7 @@ class TestStreamErrorHandling:
 
         def failing_stream():
             raise RuntimeError("immediate failure")
-            yield  # noqa: unreachable
+            yield  # noqa: F401
 
         gen = _wrap_stream_sync(gate, adapter, failing_stream(), session, "gpt-4o", 1, {}, ctx=ctx)
 

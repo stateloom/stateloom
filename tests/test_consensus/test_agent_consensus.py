@@ -6,7 +6,6 @@ import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from stateloom.consensus.models import (
     ConsensusConfig,
     ConsensusResult,
@@ -19,7 +18,6 @@ from stateloom.consensus.strategies.debate import DebateStrategy
 from stateloom.consensus.strategies.self_consistency import SelfConsistencyStrategy
 from stateloom.consensus.strategies.vote import VoteStrategy
 from stateloom.core.session import Session
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,8 +43,12 @@ def _make_parent_session(session_id="parent-1"):
 
 def _mock_chat_response(text="Answer text [Confidence: 0.85]", cost=0.01, tokens=50):
     return types.SimpleNamespace(
-        content=text, cost=cost, tokens=tokens,
-        model="gpt-4o", provider="openai", raw=None,
+        content=text,
+        cost=cost,
+        tokens=tokens,
+        model="gpt-4o",
+        provider="openai",
+        raw=None,
     )
 
 
@@ -488,9 +490,7 @@ class TestGateConsensusAgentResolution:
             "stateloom.consensus.orchestrator.ConsensusOrchestrator",
             return_value=mock_orch,
         ):
-            result = await Gate.consensus(
-                gate, agent="medical-advisor", prompt="test"
-            )
+            result = await Gate.consensus(gate, agent="medical-advisor", prompt="test")
 
         # Verify config was populated with agent fields
         call_config = mock_orch.run.call_args[0][0]

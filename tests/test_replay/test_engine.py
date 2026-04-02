@@ -5,7 +5,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import stateloom
-from stateloom.core.context import get_current_replay_engine, get_current_session, set_current_session
+from stateloom.core.context import (
+    get_current_replay_engine,
+    get_current_session,
+    set_current_session,
+)
 from stateloom.core.event import CheckpointEvent, LLMCallEvent
 from stateloom.replay.engine import DurableReplayEngine, ReplayEngine
 from stateloom.replay.schema import serialize_response
@@ -210,18 +214,54 @@ class TestDurableReplayEngineStepRenumbering:
         """When checkpoints create gaps (steps 2,3,4,5,6,7), durable maps to 1,2,3,4,5,6."""
         # Simulate: step 1 = checkpoint, steps 2-7 = LLM, step 8 = checkpoint
         steps = [
-            StepRecord(step=2, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"choices":[]}', prompt_preview="q1"),
-            StepRecord(step=3, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"choices":[]}', prompt_preview="q2"),
-            StepRecord(step=4, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"choices":[]}', prompt_preview="q3"),
-            StepRecord(step=5, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"choices":[]}', prompt_preview="q4"),
-            StepRecord(step=6, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"choices":[]}', prompt_preview="q5"),
-            StepRecord(step=7, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"choices":[]}', prompt_preview="q6"),
+            StepRecord(
+                step=2,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"choices":[]}',
+                prompt_preview="q1",
+            ),
+            StepRecord(
+                step=3,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"choices":[]}',
+                prompt_preview="q2",
+            ),
+            StepRecord(
+                step=4,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"choices":[]}',
+                prompt_preview="q3",
+            ),
+            StepRecord(
+                step=5,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"choices":[]}',
+                prompt_preview="q4",
+            ),
+            StepRecord(
+                step=6,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"choices":[]}',
+                prompt_preview="q5",
+            ),
+            StepRecord(
+                step=7,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"choices":[]}',
+                prompt_preview="q6",
+            ),
         ]
 
         engine = DurableReplayEngine(steps)
@@ -237,12 +277,30 @@ class TestDurableReplayEngineStepRenumbering:
     def test_renumbers_contiguous_steps(self):
         """Steps already numbered 1,2,3 stay as 1,2,3."""
         steps = [
-            StepRecord(step=1, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"choices":[]}', prompt_preview="q1"),
-            StepRecord(step=2, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"choices":[]}', prompt_preview="q2"),
-            StepRecord(step=3, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"choices":[]}', prompt_preview="q3"),
+            StepRecord(
+                step=1,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"choices":[]}',
+                prompt_preview="q1",
+            ),
+            StepRecord(
+                step=2,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"choices":[]}',
+                prompt_preview="q2",
+            ),
+            StepRecord(
+                step=3,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"choices":[]}',
+                prompt_preview="q3",
+            ),
         ]
 
         engine = DurableReplayEngine(steps)
@@ -260,12 +318,30 @@ class TestDurableReplayEngineStepRenumbering:
     def test_preserves_order_by_original_step(self):
         """Re-numbered steps preserve the original step ordering."""
         steps = [
-            StepRecord(step=5, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"r":"fifth"}', prompt_preview="q5"),
-            StepRecord(step=3, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"r":"third"}', prompt_preview="q3"),
-            StepRecord(step=10, event_type="llm_call", provider="openai", model="gpt-4o",
-                       cached_response_json='{"r":"tenth"}', prompt_preview="q10"),
+            StepRecord(
+                step=5,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"r":"fifth"}',
+                prompt_preview="q5",
+            ),
+            StepRecord(
+                step=3,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"r":"third"}',
+                prompt_preview="q3",
+            ),
+            StepRecord(
+                step=10,
+                event_type="llm_call",
+                provider="openai",
+                model="gpt-4o",
+                cached_response_json='{"r":"tenth"}',
+                prompt_preview="q10",
+            ),
         ]
 
         engine = DurableReplayEngine(steps)
@@ -280,6 +356,6 @@ class TestDurableReplayEngineStepRenumbering:
         r1 = engine._step_index[1]
         r2 = engine._step_index[2]
         r3 = engine._step_index[3]
-        assert r1.prompt_preview == "q3"   # original step 3
-        assert r2.prompt_preview == "q5"   # original step 5
+        assert r1.prompt_preview == "q3"  # original step 3
+        assert r2.prompt_preview == "q5"  # original step 5
         assert r3.prompt_preview == "q10"  # original step 10

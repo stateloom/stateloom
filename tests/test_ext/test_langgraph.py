@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 import stateloom
 from stateloom.core.event import ToolCallEvent
 from stateloom.gate import Gate
@@ -103,7 +102,9 @@ class TestLangGraphAdapter:
             node = MockToolNode()
             with gate.session("test-langgraph-sync") as session:
                 result = node._execute_tool_sync(
-                    _make_request("calculate"), "list", {},
+                    _make_request("calculate"),
+                    "list",
+                    {},
                 )
                 assert result.content == "mock_result"
 
@@ -136,7 +137,9 @@ class TestLangGraphAdapter:
             node = MockToolNode()
             with gate.session("test-langgraph-async") as session:
                 result = await node._execute_tool_async(
-                    _make_request("search_web"), "list", {},
+                    _make_request("search_web"),
+                    "list",
+                    {},
                 )
                 assert result.content == "mock_result"
 

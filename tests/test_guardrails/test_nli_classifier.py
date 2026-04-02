@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-
 from stateloom.guardrails.nli_classifier import NLIInjectionClassifier
 
 
@@ -49,10 +48,12 @@ class TestNLIInjectionClassifierClassify:
         # Mock returns (2, 3) array: [contradiction, entailment, neutral] per pair
         # High entailment for injection hypothesis, low for normal
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([
-            [-2.0, 2.0, -1.0],   # injection: high entailment
-            [2.0, -2.0, -1.0],   # normal: low entailment
-        ])
+        mock_model.predict.return_value = np.array(
+            [
+                [-2.0, 2.0, -1.0],  # injection: high entailment
+                [2.0, -2.0, -1.0],  # normal: low entailment
+            ]
+        )
         classifier._initialized = True
         classifier._backend = "sentence_transformers"
         classifier._model = mock_model
@@ -65,10 +66,12 @@ class TestNLIInjectionClassifierClassify:
     def test_classify_normal_text_low_score(self):
         classifier = NLIInjectionClassifier()
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([
-            [2.0, -2.0, -1.0],   # injection: low entailment
-            [-2.0, 2.0, -1.0],   # normal: high entailment
-        ])
+        mock_model.predict.return_value = np.array(
+            [
+                [2.0, -2.0, -1.0],  # injection: low entailment
+                [-2.0, 2.0, -1.0],  # normal: high entailment
+            ]
+        )
         classifier._initialized = True
         classifier._backend = "sentence_transformers"
         classifier._model = mock_model
@@ -81,10 +84,12 @@ class TestNLIInjectionClassifierClassify:
         classifier = NLIInjectionClassifier()
         mock_model = MagicMock()
         # Both entailment logits are very negative → exp() ≈ 0
-        mock_model.predict.return_value = np.array([
-            [0.0, -100.0, 0.0],
-            [0.0, -100.0, 0.0],
-        ])
+        mock_model.predict.return_value = np.array(
+            [
+                [0.0, -100.0, 0.0],
+                [0.0, -100.0, 0.0],
+            ]
+        )
         classifier._initialized = True
         classifier._backend = "sentence_transformers"
         classifier._model = mock_model
@@ -95,10 +100,12 @@ class TestNLIInjectionClassifierClassify:
     def test_classify_truncates_long_input(self):
         classifier = NLIInjectionClassifier()
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-        ])
+        mock_model.predict.return_value = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ]
+        )
         classifier._initialized = True
         classifier._backend = "sentence_transformers"
         classifier._model = mock_model

@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from stateloom.core.config import StateLoomConfig
 from stateloom.core.errors import (
     StateLoomBudgetError,
@@ -490,9 +489,9 @@ class TestCodeAssistErrorFormat:
                 headers={"Authorization": "Bearer oauth-token"},
             )
 
-            assert resp.status_code == expected_status, (
-                f"Expected {expected_status} for {type(error).__name__}, got {resp.status_code}"
-            )
+            assert (
+                resp.status_code == expected_status
+            ), f"Expected {expected_status} for {type(error).__name__}, got {resp.status_code}"
             data = resp.json()
             assert "error" in data
             assert data["error"]["status"] == expected_status_str
@@ -742,7 +741,9 @@ class TestCodeAssistBodyPatch:
         current_messages = [
             {"role": "user", "content": "hello", "_content_idx": 2},
         ]
-        rebuilt = json.loads(_patch_code_assist_body(original_body, original_messages, current_messages))
+        rebuilt = json.loads(
+            _patch_code_assist_body(original_body, original_messages, current_messages)
+        )
 
         assert rebuilt["model"] == "models/gemini-2.0-flash"
         assert rebuilt["traceId"] == "abc"  # preserved
@@ -767,7 +768,9 @@ class TestCodeAssistBodyPatch:
         current_messages = [
             {"role": "user", "content": "hi", "_content_idx": 0},
         ]
-        rebuilt = json.loads(_patch_code_assist_body(original_body, original_messages, current_messages))
+        rebuilt = json.loads(
+            _patch_code_assist_body(original_body, original_messages, current_messages)
+        )
 
         assert "systemInstruction" not in rebuilt["request"]
 
@@ -789,7 +792,9 @@ class TestCodeAssistBodyPatch:
         current_messages = [
             {"role": "user", "content": "my ssn is [REDACTED]", "_content_idx": 0},
         ]
-        rebuilt = json.loads(_patch_code_assist_body(original_body, original_messages, current_messages))
+        rebuilt = json.loads(
+            _patch_code_assist_body(original_body, original_messages, current_messages)
+        )
 
         assert rebuilt["request"]["contents"][0]["parts"][0]["text"] == "my ssn is [REDACTED]"
 
@@ -818,7 +823,12 @@ class TestCodeAssistBodyPatch:
                     {
                         "role": "user",
                         "parts": [
-                            {"functionResponse": {"name": "google_web_search", "response": {"result": "ok"}}},
+                            {
+                                "functionResponse": {
+                                    "name": "google_web_search",
+                                    "response": {"result": "ok"},
+                                }
+                            },
                         ],
                     },
                     {"role": "user", "parts": [{"text": "what about now?"}]},
@@ -827,17 +837,39 @@ class TestCodeAssistBodyPatch:
         }
         original_messages = [
             {"role": "user", "content": "my ssn is 123-12-1234", "_content_idx": 0},
-            {"role": "assistant", "content": "I'll search for that.", "tool_calls": [...], "_content_idx": 1},
-            {"role": "tool", "content": '{"result": "ok"}', "tool_call_id": "google_web_search", "_content_idx": 2},
+            {
+                "role": "assistant",
+                "content": "I'll search for that.",
+                "tool_calls": [...],
+                "_content_idx": 1,
+            },
+            {
+                "role": "tool",
+                "content": '{"result": "ok"}',
+                "tool_call_id": "google_web_search",
+                "_content_idx": 2,
+            },
             {"role": "user", "content": "what about now?", "_content_idx": 3},
         ]
         # Strip the SSN message (index 0)
         current_messages = [
-            {"role": "assistant", "content": "I'll search for that.", "tool_calls": [...], "_content_idx": 1},
-            {"role": "tool", "content": '{"result": "ok"}', "tool_call_id": "google_web_search", "_content_idx": 2},
+            {
+                "role": "assistant",
+                "content": "I'll search for that.",
+                "tool_calls": [...],
+                "_content_idx": 1,
+            },
+            {
+                "role": "tool",
+                "content": '{"result": "ok"}',
+                "tool_call_id": "google_web_search",
+                "_content_idx": 2,
+            },
             {"role": "user", "content": "what about now?", "_content_idx": 3},
         ]
-        rebuilt = json.loads(_patch_code_assist_body(original_body, original_messages, current_messages))
+        rebuilt = json.loads(
+            _patch_code_assist_body(original_body, original_messages, current_messages)
+        )
 
         contents = rebuilt["request"]["contents"]
         assert len(contents) == 3  # SSN message stripped
@@ -1041,13 +1073,24 @@ class TestCodeAssistToolContinuation:
 
         contents = [
             {"role": "user", "parts": [{"text": "check the code"}]},
-            {"role": "model", "parts": [
-                {"text": "I'll look at the files."},
-                {"functionCall": {"name": "read_file", "args": {"path": "main.py"}}},
-            ]},
-            {"role": "user", "parts": [
-                {"functionResponse": {"name": "read_file", "response": {"content": "print('hi')"}}},
-            ]},
+            {
+                "role": "model",
+                "parts": [
+                    {"text": "I'll look at the files."},
+                    {"functionCall": {"name": "read_file", "args": {"path": "main.py"}}},
+                ],
+            },
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "functionResponse": {
+                            "name": "read_file",
+                            "response": {"content": "print('hi')"},
+                        }
+                    },
+                ],
+            },
         ]
         messages = _contents_to_openai_messages(contents)
         assert _is_tool_continuation(messages) is True
@@ -1065,10 +1108,13 @@ class TestCodeAssistToolContinuation:
     def test_function_call_translated_to_tool_calls(self):
         """functionCall parts become assistant tool_calls in OpenAI format."""
         contents = [
-            {"role": "model", "parts": [
-                {"text": "Let me check."},
-                {"functionCall": {"name": "search", "args": {"q": "test"}}},
-            ]},
+            {
+                "role": "model",
+                "parts": [
+                    {"text": "Let me check."},
+                    {"functionCall": {"name": "search", "args": {"q": "test"}}},
+                ],
+            },
         ]
         messages = _contents_to_openai_messages(contents)
         assert len(messages) == 1
@@ -1084,12 +1130,18 @@ class TestCodeAssistToolContinuation:
 
         contents = [
             {"role": "user", "parts": [{"text": "check the code"}]},
-            {"role": "model", "parts": [
-                {"functionCall": {"name": "read_file", "args": {}}},
-            ]},
-            {"role": "user", "parts": [
-                {"functionResponse": {"name": "read_file", "response": {"content": "..."}}},
-            ]},
+            {
+                "role": "model",
+                "parts": [
+                    {"functionCall": {"name": "read_file", "args": {}}},
+                ],
+            },
+            {
+                "role": "user",
+                "parts": [
+                    {"functionResponse": {"name": "read_file", "response": {"content": "..."}}},
+                ],
+            },
             {"role": "model", "parts": [{"text": "I found the file."}]},
             {"role": "user", "parts": [{"text": "now summarize it"}]},
         ]

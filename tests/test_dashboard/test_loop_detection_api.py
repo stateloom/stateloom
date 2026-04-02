@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from stateloom.core.config import StateLoomConfig
 from stateloom.gate import Gate
 
@@ -40,10 +39,9 @@ def gate_with_loop():
 
 @pytest.fixture
 def client(gate):
-    from stateloom.dashboard.api import create_api_router
-
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from stateloom.dashboard.api import create_api_router
 
     app = FastAPI()
     router = create_api_router(gate)
@@ -53,10 +51,9 @@ def client(gate):
 
 @pytest.fixture
 def client_with_loop(gate_with_loop):
-    from stateloom.dashboard.api import create_api_router
-
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from stateloom.dashboard.api import create_api_router
 
     app = FastAPI()
     router = create_api_router(gate_with_loop)
@@ -118,7 +115,9 @@ class TestLoopDetectionConfig:
 
     def test_enable_does_not_duplicate_middleware(self, client_with_loop, gate_with_loop):
         """Enabling when already enabled does not add a second LoopDetector."""
-        count_before = sum(1 for mw in gate_with_loop.pipeline.middlewares if hasattr(mw, "_threshold"))
+        count_before = sum(
+            1 for mw in gate_with_loop.pipeline.middlewares if hasattr(mw, "_threshold")
+        )
         assert count_before == 1
 
         resp = client_with_loop.patch(
@@ -127,7 +126,9 @@ class TestLoopDetectionConfig:
         )
         assert resp.status_code == 200
 
-        count_after = sum(1 for mw in gate_with_loop.pipeline.middlewares if hasattr(mw, "_threshold"))
+        count_after = sum(
+            1 for mw in gate_with_loop.pipeline.middlewares if hasattr(mw, "_threshold")
+        )
         assert count_after == 1
 
     def test_toggle_on_off_cycle(self, client, gate):

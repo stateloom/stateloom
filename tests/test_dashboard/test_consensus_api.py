@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from stateloom.core.event import ConsensusEvent, DebateRoundEvent
 from stateloom.dashboard.api import create_api_router
 from stateloom.store.memory_store import MemoryStore
@@ -205,31 +204,35 @@ class TestGetConsensusRun:
         gate.store.save_session(session)
 
         for rn in range(1, 4):
-            gate.store.save_event(DebateRoundEvent(
+            gate.store.save_event(
+                DebateRoundEvent(
+                    session_id="multi-round",
+                    round_number=rn,
+                    strategy="debate",
+                    models=["gpt-4o", "claude-sonnet-4-20250514"],
+                    responses_summary=[],
+                    agreement_score=0.5 + rn * 0.1,
+                    consensus_reached=rn == 3,
+                    round_cost=0.01,
+                    round_duration_ms=500.0,
+                )
+            )
+
+        gate.store.save_event(
+            ConsensusEvent(
                 session_id="multi-round",
-                round_number=rn,
                 strategy="debate",
                 models=["gpt-4o", "claude-sonnet-4-20250514"],
-                responses_summary=[],
-                agreement_score=0.5 + rn * 0.1,
-                consensus_reached=rn == 3,
-                round_cost=0.01,
-                round_duration_ms=500.0,
-            ))
-
-        gate.store.save_event(ConsensusEvent(
-            session_id="multi-round",
-            strategy="debate",
-            models=["gpt-4o", "claude-sonnet-4-20250514"],
-            total_rounds=3,
-            final_answer_preview="Final answer.",
-            confidence=0.92,
-            total_cost=0.03,
-            total_duration_ms=3000.0,
-            early_stopped=False,
-            aggregation_method="judge_synthesis",
-            winner_model="gpt-4o",
-        ))
+                total_rounds=3,
+                final_answer_preview="Final answer.",
+                confidence=0.92,
+                total_cost=0.03,
+                total_duration_ms=3000.0,
+                early_stopped=False,
+                aggregation_method="judge_synthesis",
+                winner_model="gpt-4o",
+            )
+        )
 
         resp = client.get("/api/v1/consensus-runs/multi-round")
         assert resp.status_code == 200

@@ -5,14 +5,16 @@ from __future__ import annotations
 import types
 
 import pytest
-
 from stateloom.core.config import StateLoomConfig
 from stateloom.core.event import LLMCallEvent
 from stateloom.core.session import Session
 from stateloom.middleware.base import MiddlewareContext
-from stateloom.middleware.cost_tracker import CostTracker, _extract_tool_preview, _is_tool_continuation
+from stateloom.middleware.cost_tracker import (
+    CostTracker,
+    _extract_tool_preview,
+    _is_tool_continuation,
+)
 from stateloom.pricing.registry import PricingRegistry
-
 
 # --- Unit tests for _is_tool_continuation ---
 
@@ -188,12 +190,22 @@ class TestIsToolContinuation:
         # After Gemini proxy translation, functionResponse becomes role="tool"
         messages = [
             {"role": "user", "content": "check the codebase"},
-            {"role": "assistant", "content": None, "tool_calls": [
-                {"id": "codebase_investigator", "type": "function",
-                 "function": {"name": "codebase_investigator", "arguments": "{}"}}
-            ]},
-            {"role": "tool", "content": '{"output": "found 3 issues"}',
-             "tool_call_id": "codebase_investigator"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "codebase_investigator",
+                        "type": "function",
+                        "function": {"name": "codebase_investigator", "arguments": "{}"},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "content": '{"output": "found 3 issues"}',
+                "tool_call_id": "codebase_investigator",
+            },
         ]
         assert _is_tool_continuation(messages) is True
 
@@ -201,10 +213,17 @@ class TestIsToolContinuation:
         """Gemini: new user prompt after prior function calls — NOT a continuation."""
         messages = [
             {"role": "user", "content": "check the codebase"},
-            {"role": "assistant", "content": None, "tool_calls": [
-                {"id": "search", "type": "function",
-                 "function": {"name": "search", "arguments": "{}"}}
-            ]},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "search",
+                        "type": "function",
+                        "function": {"name": "search", "arguments": "{}"},
+                    }
+                ],
+            },
             {"role": "tool", "content": '{"result": "ok"}', "tool_call_id": "search"},
             {"role": "assistant", "content": "I found no issues."},
             {"role": "user", "content": "now fix the bug"},
@@ -318,7 +337,11 @@ class TestExtractToolPreview:
                 "role": "assistant",
                 "content": "I will read the main file.",
                 "tool_calls": [
-                    {"id": "tc1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    },
                 ],
             },
             {"role": "tool", "tool_call_id": "tc1", "content": "print('hi')"},
@@ -420,8 +443,11 @@ class TestExtractToolPreview:
                 "role": "assistant",
                 "content": "I will explore the project root.",
                 "tool_calls": [
-                    {"id": "list_directory", "type": "function",
-                     "function": {"name": "list_directory", "arguments": "{}"}},
+                    {
+                        "id": "list_directory",
+                        "type": "function",
+                        "function": {"name": "list_directory", "arguments": "{}"},
+                    },
                 ],
             },
             {"role": "tool", "content": '{"files": ["main.py"]}', "tool_call_id": "list_directory"},

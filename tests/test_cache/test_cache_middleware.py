@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 
 import pytest
-
 from stateloom.cache.base import CacheEntry
 from stateloom.cache.memory_store import MemoryCacheStore
 from stateloom.core.config import StateLoomConfig
@@ -218,7 +217,10 @@ class TestCacheMiddleware:
 
     async def test_error_response_not_cached_anthropic(self, store, config):
         """Anthropic-style error dicts must not be stored in cache."""
-        error_resp = {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+        error_resp = {
+            "type": "error",
+            "error": {"type": "overloaded_error", "message": "Overloaded"},
+        }
         middleware = CacheMiddleware(config, cache_store=store)
         call_next, _ = _make_pipeline_next(llm_response=error_resp)
 
@@ -229,7 +231,9 @@ class TestCacheMiddleware:
 
     async def test_error_response_not_cached_openai(self, store, config):
         """OpenAI-style error dicts must not be stored in cache."""
-        error_resp = {"error": {"message": "Rate limit exceeded", "type": "rate_limit_error", "code": 429}}
+        error_resp = {
+            "error": {"message": "Rate limit exceeded", "type": "rate_limit_error", "code": 429}
+        }
         middleware = CacheMiddleware(config, cache_store=store)
         call_next, _ = _make_pipeline_next(llm_response=error_resp)
 
@@ -249,7 +253,11 @@ class TestCacheMiddleware:
 
     async def test_success_response_still_cached(self, store, config):
         """Normal success responses should still be cached."""
-        success_resp = {"id": "resp-1", "object": "chat.completion", "choices": [{"message": {"content": "hi"}}]}
+        success_resp = {
+            "id": "resp-1",
+            "object": "chat.completion",
+            "choices": [{"message": {"content": "hi"}}],
+        }
         middleware = CacheMiddleware(config, cache_store=store)
         call_next, _ = _make_pipeline_next(llm_response=success_resp)
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from stateloom.core.config import PIIRule, StateLoomConfig
 from stateloom.core.session import Session
 from stateloom.core.types import BudgetAction, GuardrailMode, PIIMode
@@ -51,11 +50,13 @@ class TestPIIScannerStoreSync:
         # Persist a new config to the store
         store.save_secret(
             "pii_config_json",
-            json.dumps({
-                "enabled": True,
-                "default_mode": "redact",
-                "rules": [{"pattern": "email", "mode": "block"}],
-            }),
+            json.dumps(
+                {
+                    "enabled": True,
+                    "default_mode": "redact",
+                    "rules": [{"pattern": "email", "mode": "block"}],
+                }
+            ),
         )
 
         # Force poll by resetting timer
@@ -83,11 +84,13 @@ class TestPIIScannerStoreSync:
 
         store.save_secret(
             "pii_config_json",
-            json.dumps({
-                "enabled": True,
-                "default_mode": "audit",
-                "rules": [{"pattern": "email", "mode": "block"}],
-            }),
+            json.dumps(
+                {
+                    "enabled": True,
+                    "default_mode": "audit",
+                    "rules": [{"pattern": "email", "mode": "block"}],
+                }
+            ),
         )
 
         mw._last_store_poll = 0.0
@@ -177,11 +180,13 @@ class TestBudgetEnforcerStoreSync:
 
         store.save_secret(
             "budget_config_json",
-            json.dumps({
-                "budget_per_session": 5.0,
-                "budget_global": 100.0,
-                "budget_action": "warn",
-            }),
+            json.dumps(
+                {
+                    "budget_per_session": 5.0,
+                    "budget_global": 100.0,
+                    "budget_action": "warn",
+                }
+            ),
         )
 
         mw._last_store_poll = 0.0
@@ -200,11 +205,13 @@ class TestBudgetEnforcerStoreSync:
 
         store.save_secret(
             "budget_config_json",
-            json.dumps({
-                "budget_per_session": None,
-                "budget_global": None,
-                "budget_action": "hard_stop",
-            }),
+            json.dumps(
+                {
+                    "budget_per_session": None,
+                    "budget_global": None,
+                    "budget_action": "hard_stop",
+                }
+            ),
         )
 
         mw._last_store_poll = 0.0
@@ -229,11 +236,13 @@ class TestBlastRadiusStoreSync:
 
         store.save_secret(
             "blast_radius_config_json",
-            json.dumps({
-                "enabled": True,
-                "consecutive_failures": 10,
-                "budget_violations_per_hour": 20,
-            }),
+            json.dumps(
+                {
+                    "enabled": True,
+                    "consecutive_failures": 10,
+                    "budget_violations_per_hour": 20,
+                }
+            ),
         )
 
         mw._last_store_poll = 0.0
@@ -294,16 +303,18 @@ class TestGuardrailsStoreSync:
 
         store.save_secret(
             "guardrails_config_json",
-            json.dumps({
-                "enabled": True,
-                "mode": "enforce",
-                "heuristic_enabled": False,
-                "nli_enabled": True,
-                "nli_threshold": 0.85,
-                "local_model_enabled": False,
-                "output_scanning_enabled": False,
-                "disabled_rules": ["dan_mode"],
-            }),
+            json.dumps(
+                {
+                    "enabled": True,
+                    "mode": "enforce",
+                    "heuristic_enabled": False,
+                    "nli_enabled": True,
+                    "nli_threshold": 0.85,
+                    "local_model_enabled": False,
+                    "output_scanning_enabled": False,
+                    "disabled_rules": ["dan_mode"],
+                }
+            ),
         )
 
         mw._last_store_poll = 0.0

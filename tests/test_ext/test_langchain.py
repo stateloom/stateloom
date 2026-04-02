@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-
 import stateloom
 from stateloom.core.event import LLMCallEvent, ToolCallEvent
 
@@ -376,7 +375,9 @@ class TestLangChainHandler:
             # --- Call 1: real LLM call (tokens + cost) ---
             run1 = uuid4()
             handler.on_chat_model_start(
-                serialized, messages=prompt_messages, run_id=run1,
+                serialized,
+                messages=prompt_messages,
+                run_id=run1,
             )
             handler.on_llm_end(
                 _make_llm_result(100, 50, "openai"),
@@ -390,7 +391,9 @@ class TestLangChainHandler:
             # from the preserved llm_output tokens.
             run2 = uuid4()
             handler.on_chat_model_start(
-                serialized, messages=prompt_messages, run_id=run2,
+                serialized,
+                messages=prompt_messages,
+                run_id=run2,
             )
             cached_msg = SimpleNamespace(usage_metadata=None)
             cached_gen = SimpleNamespace(message=cached_msg)
@@ -427,7 +430,9 @@ class TestLangChainHandler:
         with gate.session("test-lc-cache-tc0") as session:
             run_id = uuid4()
             handler.on_chat_model_start(
-                serialized, messages=[[]], run_id=run_id,
+                serialized,
+                messages=[[]],
+                run_id=run_id,
             )
             cached_msg = SimpleNamespace(usage_metadata={"total_cost": 0})
             cached_gen = SimpleNamespace(message=cached_msg)
@@ -456,7 +461,9 @@ class TestLangChainHandler:
             # --- Real call ---
             run1 = uuid4()
             handler.on_chat_model_start(
-                serialized, messages=[[]], run_id=run1,
+                serialized,
+                messages=[[]],
+                run_id=run1,
             )
             # Simulate ~1s latency by backdating start_time
             handler._llm_runs[run1].start_time -= 1.0
@@ -469,7 +476,9 @@ class TestLangChainHandler:
             # Only the latency (< 100ms) reveals it's cached
             run2 = uuid4()
             handler.on_chat_model_start(
-                serialized, messages=[[]], run_id=run2,
+                serialized,
+                messages=[[]],
+                run_id=run2,
             )
             # Don't backdate — latency will be ~0ms (cache speed)
             cached_msg = SimpleNamespace(
@@ -561,9 +570,7 @@ class TestLangChainHandler:
                 run_id=run_id,
             )
 
-        events = gate_auto_patch.store.get_session_events(
-            session.id, event_type="llm_call"
-        )
+        events = gate_auto_patch.store.get_session_events(session.id, event_type="llm_call")
         assert len(events) == 0
 
     def test_tools_only_auto_detects_auto_patch_false(self, gate):
@@ -623,7 +630,7 @@ class TestLangChainHandler:
 
     def test_framework_context_set_in_tools_only_mode(self, gate):
         """on_llm_start sets the framework ContextVar even when tools_only=True."""
-        from stateloom.core.context import get_framework_context, clear_framework_context
+        from stateloom.core.context import clear_framework_context, get_framework_context
 
         handler = _make_handler(gate, tools_only=True)
         run_id = uuid4()
@@ -645,7 +652,7 @@ class TestLangChainHandler:
 
     def test_framework_context_set_in_on_chat_model_start(self, gate):
         """on_chat_model_start sets the framework ContextVar even when tools_only=True."""
-        from stateloom.core.context import get_framework_context, clear_framework_context
+        from stateloom.core.context import clear_framework_context, get_framework_context
 
         handler = _make_handler(gate, tools_only=True)
         run_id = uuid4()

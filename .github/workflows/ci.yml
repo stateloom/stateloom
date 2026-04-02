@@ -52,7 +52,7 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: pip install -e ".[dev,metrics,prompts,encryption,migrations]"
+        run: pip install -e ".[dev,typecheck,semantic,auth,metrics,prompts,encryption,migrations]"
 
       - name: mypy
         run: mypy src/stateloom/

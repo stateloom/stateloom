@@ -57,6 +57,18 @@ cohere = ["cohere>=5.0"]
 litellm = ["litellm>=1.40"]
 genai = ["google-genai>=1.0"]
 all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]", "stateloom[auth]", "stateloom[genai]"]
+typecheck = [
+    "mypy>=1.5",
+    "openai>=1.0",
+    "anthropic>=0.39",
+    "google-generativeai>=0.4",
+    "google-genai>=1.0",
+    "cohere>=5.0",
+    "mistralai>=1.0",
+    "litellm>=1.40",
+    "zstandard>=0.22",
+    "requests>=2.31",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
@@ -96,6 +108,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "examples/*.py" = ["E402"]
+"tests/**" = ["F401", "F841", "F811", "N806", "N803", "E501", "E402", "E741"]
 
 [tool.mypy]
 python_version = "3.10"

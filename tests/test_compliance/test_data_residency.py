@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from stateloom.compliance.legal_rules import get_legal_rule
 from stateloom.compliance.profiles import gdpr_profile
 from stateloom.core.config import ComplianceProfile, StateLoomConfig
@@ -128,8 +127,7 @@ class TestEndpointBlocking:
 
         # An audit event should be recorded for visibility
         audit_events = [
-            e for e in ctx.events
-            if hasattr(e, "action") and e.action == "endpoint_unknown"
+            e for e in ctx.events if hasattr(e, "action") and e.action == "endpoint_unknown"
         ]
         assert len(audit_events) == 1
         assert "skipped" in audit_events[0].justification

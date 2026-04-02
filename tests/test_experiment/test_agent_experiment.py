@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from stateloom.agent.models import AgentVersion
 from stateloom.core.config import StateLoomConfig
 from stateloom.core.session import Session
@@ -299,7 +298,10 @@ class TestAssignmentSnapshot:
         config = assignment.variant_config
         assert "_resolved_agent_overrides" in config
         assert config["_resolved_agent_overrides"]["model"] == "gpt-4o-mini"
-        assert config["_resolved_agent_overrides"]["system_prompt"] == "You are a helpful support agent."
+        assert (
+            config["_resolved_agent_overrides"]["system_prompt"]
+            == "You are a helpful support agent."
+        )
         assert config["_resolved_agent_overrides"]["request_overrides"]["temperature"] == 0.3
 
         assert "_agent_meta" in config

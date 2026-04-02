@@ -9,7 +9,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 import stateloom
 from stateloom.chat import (
     ChatResponse,
@@ -193,7 +192,9 @@ class TestGetOriginal:
         class FakeClass:
             pass
 
-        original_fn = lambda: "original"
+        def original_fn() -> str:
+            return "original"
+
         _patch_registry.append(
             PatchRecord(target=FakeClass, method_name="create", original=original_fn)
         )
@@ -213,7 +214,9 @@ class TestGetOriginal:
         class FakeClass:
             pass
 
-        original_fn = lambda: "original"
+        def original_fn() -> str:
+            return "original"
+
         _patch_registry.append(
             PatchRecord(target=FakeClass, method_name="create", original=original_fn)
         )

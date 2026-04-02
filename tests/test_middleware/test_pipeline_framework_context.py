@@ -6,7 +6,6 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-
 import stateloom
 from stateloom.core.context import clear_framework_context, set_framework_context
 from stateloom.core.event import LLMCallEvent
@@ -44,9 +43,11 @@ class TestPipelineFrameworkContext:
         mw.process = capture_middleware
         pipeline.add(mw)
 
-        set_framework_context({
-            "langchain": {"run_id": "abc-123", "tags": ["test"]},
-        })
+        set_framework_context(
+            {
+                "langchain": {"run_id": "abc-123", "tags": ["test"]},
+            }
+        )
 
         try:
             with gate.session("test-pipeline-fw") as session:
@@ -81,9 +82,11 @@ class TestPipelineFrameworkContext:
         mw.process = capture_middleware
         pipeline.add(mw)
 
-        set_framework_context({
-            "langgraph": {"node": "agent_1"},
-        })
+        set_framework_context(
+            {
+                "langgraph": {"node": "agent_1"},
+            }
+        )
 
         try:
             async with gate.async_session("test-pipeline-fw-async") as session:

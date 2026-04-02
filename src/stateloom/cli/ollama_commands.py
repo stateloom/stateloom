@@ -29,7 +29,7 @@ def install(ver: str) -> None:
 
     click.echo(f"Installing Ollama ({ver})...")
 
-    with click.progressbar(length=100, label="Downloading") as bar:  # type: ignore[var-annotated]
+    with click.progressbar(length=100, label="Downloading") as bar:
         last_pct = [0]
 
         def _progress(downloaded: int, total: int) -> None:

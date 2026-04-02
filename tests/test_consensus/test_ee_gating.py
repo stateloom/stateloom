@@ -6,7 +6,6 @@ import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from stateloom.consensus.models import (
     ConsensusConfig,
     ConsensusResult,
@@ -80,10 +79,14 @@ def _make_mock_result(session_id="test-parent", agg_method="confidence_weighted"
                 round_number=1,
                 responses=[
                     DebaterResponse(
-                        model="gpt-4o", content="42", confidence=0.9,
+                        model="gpt-4o",
+                        content="42",
+                        confidence=0.9,
                     ),
                     DebaterResponse(
-                        model="claude-sonnet-4-20250514", content="42", confidence=0.85,
+                        model="claude-sonnet-4-20250514",
+                        content="42",
+                        confidence=0.85,
                     ),
                 ],
                 agreement_score=0.95,
@@ -97,7 +100,12 @@ def _make_mock_result(session_id="test-parent", agg_method="confidence_weighted"
 
 def _mock_chat_response(text="Answer [Confidence: 0.85]"):
     return types.SimpleNamespace(
-        content=text, cost=0.01, tokens=50, model="gpt-4o", provider="openai", raw=None,
+        content=text,
+        cost=0.01,
+        tokens=50,
+        model="gpt-4o",
+        provider="openai",
+        raw=None,
     )
 
 
@@ -163,7 +171,10 @@ class TestGateConsensusGating:
 
         with pytest.raises(StateLoomFeatureError) as exc_info:
             await Gate.consensus(
-                gate, models=["a", "b"], prompt="test", greedy=True,
+                gate,
+                models=["a", "b"],
+                prompt="test",
+                greedy=True,
             )
         assert "Greedy" in str(exc_info.value)
 
@@ -174,7 +185,9 @@ class TestGateConsensusGating:
 
         with pytest.raises(StateLoomFeatureError) as exc_info:
             await Gate.consensus(
-                gate, models=["a", "b"], prompt="test",
+                gate,
+                models=["a", "b"],
+                prompt="test",
                 aggregation="judge_synthesis",
             )
         assert "Judge synthesis" in str(exc_info.value)
@@ -186,7 +199,9 @@ class TestGateConsensusGating:
 
         with pytest.raises(StateLoomFeatureError) as exc_info:
             await Gate.consensus(
-                gate, models=["a", "b"], prompt="test",
+                gate,
+                models=["a", "b"],
+                prompt="test",
                 judge_model="gpt-4o",
             )
         assert "Custom judge model" in str(exc_info.value)
@@ -221,7 +236,9 @@ class TestGateConsensusGating:
 
         with pytest.raises(StateLoomFeatureError) as exc_info:
             await Gate.consensus(
-                gate, models=["a", "b", "c", "d"], prompt="test",
+                gate,
+                models=["a", "b", "c", "d"],
+                prompt="test",
             )
         msg = str(exc_info.value)
         assert "STATELOOM_LICENSE_KEY" in msg
@@ -421,7 +438,9 @@ class TestStrategyDurablePropagation:
         )
 
         result = await SelfConsistencyStrategy().execute(
-            config, gate, parent_session,
+            config,
+            gate,
+            parent_session,
         )
         assert result.answer != ""
 

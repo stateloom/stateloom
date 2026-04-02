@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from stateloom.core.config import StateLoomConfig
 from stateloom.core.types import GuardrailMode
 from stateloom.gate import Gate
@@ -30,10 +29,9 @@ def gate():
 @pytest.fixture
 def client(gate):
     """Create a FastAPI test client for the dashboard API."""
-    from stateloom.dashboard.api import create_api_router
-
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from stateloom.dashboard.api import create_api_router
 
     app = FastAPI()
     router = create_api_router(gate)
