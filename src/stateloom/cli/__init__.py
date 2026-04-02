@@ -44,9 +44,12 @@ def _remove_pid() -> None:
     _PID_FILE.unlink(missing_ok=True)
 
 
-@click.group()
-def main() -> None:
+@click.group(invoke_without_command=True)
+@click.pass_context
+def main(ctx: click.Context) -> None:
     """StateLoom — AI gateway with observability and guardrails."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 # Register ollama subcommand group
