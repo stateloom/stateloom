@@ -47,9 +47,13 @@ class ExperimentAssigner:
         Thread-safe: the entire check-and-assign flow is serialized.
         """
         with self._lock:
-            # Check for existing assignment (inside lock to prevent TOCTOU race)
+            # Check for existing assignment (inside lock to prevent TOCTOU race).
+            # Only return early if the assignment belongs to the same experiment —
+            # a session may be reused across different experiments.
             existing = self._store.get_assignment(session_id)
-            if existing is not None:
+            if existing is not None and (
+                experiment_id is None or existing.experiment_id == experiment_id
+            ):
                 return existing
 
             if not self._running:

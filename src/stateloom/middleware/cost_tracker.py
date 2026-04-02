@@ -227,8 +227,8 @@ class CostTracker:
         if ctx._framework_context:
             event.metadata.update(ctx._framework_context)
 
-        # Store full request messages when payload storage is enabled
-        if ctx.config.store_payloads and isinstance(messages, list):
+        # Store full request messages for user prompts only (skip tool continuations)
+        if ctx.config.store_payloads and isinstance(messages, list) and not is_tool_continuation:
             if not ctx.session.metadata.get("_compliance_zero_retention"):
                 try:
                     event.request_messages_json = json.dumps(

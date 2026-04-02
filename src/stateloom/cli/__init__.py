@@ -95,7 +95,7 @@ def serve(
     \b
     Usage with Gemini CLI:
         stateloom serve --no-auth
-        export GOOGLE_GEMINI_BASE_URL=http://localhost:4782
+        export CODE_ASSIST_ENDPOINT=http://localhost:4782/code-assist
         gemini "explain this code"
     """
     _run_server(host, port, no_auth, verbose, foreground=True, with_ollama=with_ollama, debug=debug)
@@ -167,7 +167,7 @@ def start(
     click.echo("")
     click.echo("Set these environment variables to route CLI traffic through StateLoom:")
     click.echo(f"  export ANTHROPIC_BASE_URL=http://{host}:{port}")
-    click.echo(f"  export GOOGLE_GEMINI_BASE_URL=http://{host}:{port}")
+    click.echo(f"  export CODE_ASSIST_ENDPOINT=http://{host}:{port}/code-assist")
     click.echo(f"  export OPENAI_BASE_URL=http://{host}:{port}/v1")
     click.echo("")
     click.echo(f"Logs: {_LOG_FILE.resolve()}")
@@ -297,7 +297,7 @@ def _run_server(
         click.echo("")
         click.echo("Set these environment variables to route CLI traffic through StateLoom:")
         click.echo(f"  export ANTHROPIC_BASE_URL=http://{host}:{port}")
-        click.echo(f"  export GOOGLE_GEMINI_BASE_URL=http://{host}:{port}")
+        click.echo(f"  export CODE_ASSIST_ENDPOINT=http://{host}:{port}/code-assist")
         click.echo(f"  export OPENAI_BASE_URL=http://{host}:{port}/v1")
         click.echo("")
         click.echo("Press Ctrl+C to stop.")

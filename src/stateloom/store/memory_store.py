@@ -131,6 +131,7 @@ class MemoryStore:
         event_type: str | None = None,
         limit: int = 1000,
         offset: int = 0,
+        desc: bool = False,
     ) -> list[Event]:
         with self._lock:
             if session_id:
@@ -139,8 +140,42 @@ class MemoryStore:
                 events = list(self._events)
             if event_type:
                 events = [e for e in events if e.event_type.value == event_type]
-            events.sort(key=lambda e: e.timestamp)
+            events.sort(key=lambda e: e.timestamp, reverse=desc)
             return events[offset : offset + limit]
+
+    def count_events(
+        self,
+        session_id: str = "",
+        event_type: str | None = None,
+    ) -> int:
+        with self._lock:
+            if session_id:
+                events = [e for e in self._events if e.session_id == session_id]
+            else:
+                events = list(self._events)
+            if event_type:
+                events = [e for e in events if e.event_type.value == event_type]
+            return len(events)
+
+    def get_pii_stats(self) -> dict[str, Any]:
+        with self._lock:
+            pii_events = [e for e in self._events if e.event_type.value == "pii_detection"]
+            by_type: dict[str, int] = {}
+            by_action: dict[str, int] = {}
+            sessions: set[str] = set()
+            for e in pii_events:
+                pii_type = getattr(e, "pii_type", "")
+                if pii_type:
+                    by_type[pii_type] = by_type.get(pii_type, 0) + 1
+                action = getattr(e, "action_taken", "")
+                if action:
+                    by_action[action] = by_action.get(action, 0) + 1
+                sessions.add(e.session_id)
+            return {
+                "sessions_affected": len(sessions),
+                "by_type": by_type,
+                "by_action": by_action,
+            }
 
     def get_global_stats(self) -> dict[str, Any]:
         with self._lock:

@@ -49,6 +49,22 @@ def test_detect_openai_api_key():
     assert len(api_matches) >= 1
 
 
+def test_detect_openai_api_key_proj_format():
+    scanner = PIIScanner()
+    matches = scanner.scan("Key: sk-proj-abc123def456ghi789jklmno")
+    assert len(matches) >= 1
+    api_matches = [m for m in matches if "api_key" in m.pattern_name]
+    assert len(api_matches) >= 1
+
+
+def test_detect_openai_api_key_svcacct_format():
+    scanner = PIIScanner()
+    matches = scanner.scan("Key: sk-svcacct-abc123def456ghi789jklmno")
+    assert len(matches) >= 1
+    api_matches = [m for m in matches if "api_key" in m.pattern_name]
+    assert len(api_matches) >= 1
+
+
 def test_detect_aws_key():
     scanner = PIIScanner()
     matches = scanner.scan("AWS key: AKIAIOSFODNN7EXAMPLE")

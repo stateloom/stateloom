@@ -11,6 +11,10 @@ let _toolStepCache = {};  // sessionId → { parentStep → [events] } for lazy-
 let _sessionsPage = 0;
 const _sessionsPageSize = 50;
 let _sessionsTotal = 0;
+let _sessionsPageFromHash = false;  // set by handleHash to avoid resetting page on restore
+let _piiPage = 0;
+const _piiPageSize = 100;
+let _piiTotal = 0;
 let _detailEventsLoaded = [];     // accumulated events for current session detail
 let _detailEventsOffset = 0;      // current offset for event loading
 let _detailEventsHasMore = false;  // whether more events are available
@@ -100,10 +104,10 @@ function switchView(view) {
 
     // Load view data
     if (view === 'overview') loadOverview();
-    else if (view === 'sessions') { _sessionsPage = 0; loadSessions(); }
+    else if (view === 'sessions') { if (!_sessionsPageFromHash) _sessionsPage = 0; _sessionsPageFromHash = false; loadSessions(); }
     else if (view === 'models') loadModels();
     else if (view === 'experiments') loadExperiments();
-    else if (view === 'compliance') loadCompliance();
+    else if (view === 'compliance') { _piiPage = 0; loadCompliance(); }
     else if (view === 'security') loadSecurity();
     else if (view === 'observability') loadObservability();
     else if (view === 'agents') loadAgents();
@@ -190,6 +194,8 @@ async function loadOverview() {
 }
 
 async function loadSessions() {
+    // Persist page number in URL hash
+    location.hash = _sessionsPage > 0 ? `sessions?page=${_sessionsPage + 1}` : 'sessions';
     const offset = _sessionsPage * _sessionsPageSize;
     const [data, orgsData, teamsData] = await Promise.all([
         fetchJSON(`/sessions?limit=${_sessionsPageSize}&offset=${offset}`),
@@ -939,13 +945,15 @@ function renderCostByModel(data) {
 }
 
 async function loadPII() {
-    const data = await fetchJSON('/pii');
+    const offset = _piiPage * _piiPageSize;
+    const data = await fetchJSON(`/pii?limit=${_piiPageSize}&offset=${offset}`);
     if (!data) return;
     const tbody = document.getElementById('pii-tbody');
     tbody.innerHTML = '';
 
     // Populate summary stats
-    document.getElementById('pii-total').textContent = data.total || 0;
+    _piiTotal = data.total || 0;
+    document.getElementById('pii-total').textContent = _piiTotal;
     document.getElementById('pii-sessions').textContent = data.sessions_affected || 0;
 
     // Type breakdown
@@ -967,6 +975,8 @@ async function loadPII() {
     } else {
         actionEl.textContent = '—';
     }
+
+    _updatePIIPagination();
 
     if (!data.detections || data.detections.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No PII detections</td></tr>';
@@ -993,6 +1003,32 @@ async function loadPII() {
         `;
         tbody.appendChild(tr);
     });
+}
+
+function _updatePIIPagination() {
+    const totalPages = Math.max(1, Math.ceil(_piiTotal / _piiPageSize));
+    const currentPage = _piiPage + 1;
+    const infoEl = document.getElementById('pii-page-info');
+    const prevBtn = document.getElementById('pii-prev-btn');
+    const nextBtn = document.getElementById('pii-next-btn');
+    if (infoEl) infoEl.textContent = `Page ${currentPage} of ${totalPages}`;
+    if (prevBtn) prevBtn.disabled = _piiPage <= 0;
+    if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+}
+
+function piiPagePrev() {
+    if (_piiPage > 0) {
+        _piiPage--;
+        loadPII();
+    }
+}
+
+function piiPageNext() {
+    const totalPages = Math.ceil(_piiTotal / _piiPageSize);
+    if (_piiPage + 1 < totalPages) {
+        _piiPage++;
+        loadPII();
+    }
 }
 
 async function restartServer() {
@@ -5185,6 +5221,11 @@ function handleHash() {
         const view = slashIdx > 0 ? hash.slice(0, slashIdx) : hash;
         const subtab = slashIdx > 0 ? hash.slice(slashIdx + 1) : null;
 
+        // Restore sessions page from URL before switching view
+        if (view === 'sessions' && params.has('page')) {
+            const p = parseInt(params.get('page'), 10);
+            if (!isNaN(p) && p >= 1) { _sessionsPage = p - 1; _sessionsPageFromHash = true; }
+        }
         // Restore observability window from URL before switching view
         if (view === 'observability' && params.has('window')) {
             const sel = document.getElementById('obs-window');

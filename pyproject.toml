@@ -7,14 +7,14 @@ name = "stateloom"
 dynamic = ["version"]
 description = "The control plane for AI agents. Track, secure, and optimize every agent run."
 readme = "README.md"
-license = "Apache-2.0"
+license = {text = "BSL-1.1"}
 requires-python = ">=3.10"
 authors = [{ name = "StateLoom Team" }]
 keywords = ["llm", "agents", "middleware", "gateway", "observability", "pii", "debugging"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -56,7 +56,7 @@ mistral = ["mistralai>=1.0"]
 cohere = ["cohere>=5.0"]
 litellm = ["litellm>=1.40"]
 genai = ["google-genai>=1.0"]
-all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]"]
+all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]", "stateloom[auth]", "stateloom[genai]"]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
@@ -86,9 +86,6 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/stateloom"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/stateloom/ee/LICENSE" = "stateloom/ee/LICENSE"
 
 [tool.ruff]
 target-version = "py310"

@@ -459,6 +459,7 @@ def create_api_router(gate: Gate) -> APIRouter:
             "cache_hits": session.cache_hits,
             "cache_savings": round(session.cache_savings, 6),
             "pii_detections": session.pii_detections,
+            "guardrail_detections": session.guardrail_detections,
             "budget": session.budget,
             "step_counter": session.step_counter,
             "parent_session_id": session.parent_session_id,
@@ -710,20 +711,22 @@ def create_api_router(gate: Gate) -> APIRouter:
     @router.get("/pii")
     async def get_pii_detections(
         limit: int = Query(default=100, le=500),
+        offset: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
-        # Get PII events across all sessions
-        events = gate.store.get_session_events("", event_type="pii_detection", limit=limit)
+        # Paginated detections (newest first)
+        events = gate.store.get_session_events(
+            "",
+            event_type="pii_detection",
+            limit=limit,
+            offset=offset,
+            desc=True,
+        )
 
-        # Summary stats
-        by_type: dict[str, int] = {}
-        by_action: dict[str, int] = {}
-        sessions_affected: set[str] = set()
-        for e in events:
-            pii_type = getattr(e, "pii_type", "")
-            action = getattr(e, "action_taken", "")
-            by_type[pii_type] = by_type.get(pii_type, 0) + 1
-            by_action[action] = by_action.get(action, 0) + 1
-            sessions_affected.add(e.session_id)
+        # True total count via efficient COUNT(*)
+        total = gate.store.count_events(event_type="pii_detection")
+
+        # Aggregate stats across ALL events (not just this page)
+        stats = gate.store.get_pii_stats()
 
         return {
             "detections": [
@@ -740,10 +743,12 @@ def create_api_router(gate: Gate) -> APIRouter:
                 }
                 for e in events
             ],
-            "total": len(events),
-            "by_type": by_type,
-            "by_action": by_action,
-            "sessions_affected": len(sessions_affected),
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "by_type": stats["by_type"],
+            "by_action": stats["by_action"],
+            "sessions_affected": stats["sessions_affected"],
         }
 
     # --- Experiment endpoints ---

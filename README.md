@@ -1,6 +1,6 @@
 # StateLoom
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-BSL%201.1-orange.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
 
 **The stateful control plane for AI agents.** Track, secure, and optimize every agent run — not just individual LLM calls.
@@ -11,6 +11,8 @@ stateloom.init()
 # That's it. Every agent run is tracked as a session.
 # Open localhost:4782 for the live dashboard.
 ```
+
+![StateLoom Dashboard](assets/homescreen.png)
 
 ---
 
@@ -113,6 +115,10 @@ gemini "refactor the auth module"
 ```
 
 Both CLIs connect to the same StateLoom instance. Subscription users (Claude Max, Gemini Ultra) work transparently — OAuth tokens pass through to the upstream provider.
+
+[![Claude CLI through StateLoom](https://img.youtube.com/vi/ZGct2D3Bwb4/maxresdefault.jpg)](https://www.youtube.com/watch?v=ZGct2D3Bwb4)
+
+![Gemini CLI session in StateLoom dashboard](assets/gemini_cli.png)
 
 **What you get:**
 - Every multi-step agent run grouped into a single session with a waterfall trace timeline
@@ -242,6 +248,10 @@ stateloom.init(
 )
 ```
 
+![PII blocked — SSN detected in Claude CLI tool-use flow](assets/ssn_block.png)
+
+![PII blocked in OpenClaw chat UI](assets/openclaw_pii_block.png)
+
 ### Guardrails
 
 ```python
@@ -255,6 +265,8 @@ stateloom.init(
 # Runtime toggle (no restart needed)
 stateloom.configure_guardrails(nli_enabled=True, nli_threshold=0.8)
 ```
+
+![Guardrail detecting prompt injection — 3 heuristic matches logged](assets/guardrail.png)
 
 ### Kill Switch
 
@@ -300,6 +312,8 @@ stateloom.init(
 )
 # Dashboard: localhost:4782 → Model Testing → see similarity scores
 ```
+
+![Budget exceeded — session hard-stopped after $0.001 limit crossed](assets/session_budget.png)
 
 ### Durable Resumption
 
@@ -363,6 +377,14 @@ print(response.content)  # "The capital of France is Paris."
 ## Dashboard
 
 Starts automatically at `localhost:4782`. Live session viewer, REST API, and WebSocket event streaming.
+
+![Session detail with waterfall trace, child sessions, and org/team budgets](assets/session-example.png)
+
+![Full event detail — model, tokens, cost, latency, request messages](assets/full_prompt_preview.png)
+
+![Exact-match caching — duplicate calls served from cache with saved cost](assets/caching.png)
+
+![Session timeout — auto-terminated after 8s limit](assets/timeout.png)
 
 - **Overview** — total cost, active sessions, cloud/local calls, PII detections, guardrail detections, cache hits
 - **Sessions** — list, detail with waterfall trace timeline, cost/token breakdown, child sessions
@@ -483,4 +505,4 @@ See the [CLAUDE.md](CLAUDE.md) file for detailed architecture documentation and 
 
 ## License
 
-[Apache 2.0](LICENSE)
+[BSL 1.1](LICENSE)

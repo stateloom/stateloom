@@ -93,6 +93,29 @@ class TestCostTrackerRequestMessages:
         assert event.request_messages_json is None
 
     @pytest.mark.asyncio
+    async def test_messages_not_stored_for_tool_continuation(self) -> None:
+        pricing = PricingRegistry()
+        pricing.register("gpt-4o", input_per_token=0.0, output_per_token=0.0)
+        tracker = CostTracker(pricing)
+
+        # Tool continuation: last message has role="tool"
+        messages = [
+            {"role": "user", "content": "call the tool"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1"}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "result"},
+        ]
+        ctx = self._make_ctx(store_payloads=True, messages=messages)
+
+        async def noop(c: MiddlewareContext) -> None:
+            return None
+
+        await tracker.process(ctx, noop)
+
+        event = ctx.events[0]
+        assert isinstance(event, LLMCallEvent)
+        assert event.request_messages_json is None
+
+    @pytest.mark.asyncio
     async def test_messages_not_stored_with_zero_retention(self) -> None:
         pricing = PricingRegistry()
         pricing.register("gpt-4o", input_per_token=0.0, output_per_token=0.0)

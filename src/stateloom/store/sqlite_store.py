@@ -655,6 +655,14 @@ class SQLiteStore:
             CREATE INDEX IF NOT EXISTS idx_agent_versions_agent ON agent_versions(agent_id);
         """)
 
+        # Normalize legacy action_taken values (pre-ActionTaken enum)
+        self._conn.execute(
+            "UPDATE events SET action_taken = 'redacted' WHERE action_taken = 'redact'"
+        )
+        self._conn.execute(
+            "UPDATE events SET action_taken = 'blocked' WHERE action_taken = 'block'"
+        )
+
     def save_session(self, session: Session) -> None:
         with self._lock:
             self._conn.execute(
@@ -889,6 +897,7 @@ class SQLiteStore:
         event_type: str | None = None,
         limit: int = 1000,
         offset: int = 0,
+        desc: bool = False,
     ) -> list[Event]:
         conn = self._get_conn()
         # Exclude the full request_messages_json payload from bulk queries —
@@ -914,10 +923,58 @@ class SQLiteStore:
         if event_type:
             query += " AND event_type = ?"
             params.append(event_type)
-        query += " ORDER BY timestamp ASC LIMIT ? OFFSET ?"
+        order = "DESC" if desc else "ASC"
+        query += f" ORDER BY timestamp {order} LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         rows = conn.execute(query, params).fetchall()
         return [self._row_to_event(r) for r in rows]
+
+    def count_events(
+        self,
+        session_id: str = "",
+        event_type: str | None = None,
+    ) -> int:
+        conn = self._get_conn()
+        if session_id:
+            query = "SELECT COUNT(*) FROM events WHERE session_id = ?"
+            params: list[Any] = [session_id]
+        else:
+            query = "SELECT COUNT(*) FROM events WHERE 1=1"
+            params = []
+        if event_type:
+            query += " AND event_type = ?"
+            params.append(event_type)
+        row = conn.execute(query, params).fetchone()
+        return row[0] if row else 0
+
+    def get_pii_stats(self) -> dict[str, Any]:
+        conn = self._get_conn()
+        # Sessions affected
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT session_id) FROM events WHERE event_type = 'pii_detection'"
+        ).fetchone()
+        sessions_affected = row[0] if row else 0
+        # By type
+        by_type: dict[str, int] = {}
+        for r in conn.execute(
+            "SELECT pii_type, COUNT(*) FROM events"
+            " WHERE event_type = 'pii_detection' GROUP BY pii_type"
+        ).fetchall():
+            if r[0]:
+                by_type[r[0]] = r[1]
+        # By action
+        by_action: dict[str, int] = {}
+        for r in conn.execute(
+            "SELECT action_taken, COUNT(*) FROM events"
+            " WHERE event_type = 'pii_detection' GROUP BY action_taken"
+        ).fetchall():
+            if r[0]:
+                by_action[r[0]] = r[1]
+        return {
+            "sessions_affected": sessions_affected,
+            "by_type": by_type,
+            "by_action": by_action,
+        }
 
     def get_global_stats(self) -> dict[str, Any]:
         conn = self._get_conn()

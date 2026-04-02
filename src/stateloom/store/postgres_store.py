@@ -708,6 +708,7 @@ class PostgresStore:
         event_type: str | None = None,
         limit: int = 1000,
         offset: int = 0,
+        desc: bool = False,
     ) -> list[Event]:
         with self._pool.connection() as conn:
             if session_id:
@@ -719,10 +720,58 @@ class PostgresStore:
             if event_type:
                 query += " AND event_type = %s"
                 params.append(event_type)
-            query += " ORDER BY timestamp ASC LIMIT %s OFFSET %s"
+            order = "DESC" if desc else "ASC"
+            query += f" ORDER BY timestamp {order} LIMIT %s OFFSET %s"
             params.extend([limit, offset])
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_event(r) for r in rows]
+
+    def count_events(
+        self,
+        session_id: str = "",
+        event_type: str | None = None,
+    ) -> int:
+        with self._pool.connection() as conn:
+            if session_id:
+                query = "SELECT COUNT(*) FROM events WHERE session_id = %s"
+                params: list[Any] = [session_id]
+            else:
+                query = "SELECT COUNT(*) FROM events WHERE 1=1"
+                params = []
+            if event_type:
+                query += " AND event_type = %s"
+                params.append(event_type)
+            row = conn.execute(query, params).fetchone()
+            return row[0] if row else 0
+
+    def get_pii_stats(self) -> dict[str, Any]:
+        with self._pool.connection() as conn:
+            # Sessions affected
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM events WHERE event_type = 'pii_detection'"
+            ).fetchone()
+            sessions_affected = row[0] if row else 0
+            # By type
+            by_type: dict[str, int] = {}
+            for r in conn.execute(
+                "SELECT pii_type, COUNT(*) FROM events"
+                " WHERE event_type = 'pii_detection' GROUP BY pii_type"
+            ).fetchall():
+                if r[0]:
+                    by_type[r[0]] = r[1]
+            # By action
+            by_action: dict[str, int] = {}
+            for r in conn.execute(
+                "SELECT action_taken, COUNT(*) FROM events"
+                " WHERE event_type = 'pii_detection' GROUP BY action_taken"
+            ).fetchall():
+                if r[0]:
+                    by_action[r[0]] = r[1]
+            return {
+                "sessions_affected": sessions_affected,
+                "by_type": by_type,
+                "by_action": by_action,
+            }
 
     def get_global_stats(self) -> dict[str, Any]:
         with self._pool.connection() as conn:

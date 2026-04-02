@@ -36,7 +36,7 @@ PII_PATTERNS: dict[str, PIIPattern] = {
     ),
     "api_key_openai": PIIPattern(
         name="api_key_openai",
-        regex=re.compile(r"\bsk-[a-zA-Z0-9]{20,}\b"),
+        regex=re.compile(r"\bsk-[a-zA-Z0-9][a-zA-Z0-9\-]{19,}\b"),
     ),
     "api_key_anthropic": PIIPattern(
         name="api_key_anthropic",

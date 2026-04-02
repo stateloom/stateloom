@@ -13,7 +13,6 @@ conversation history is resent on every turn.
 from __future__ import annotations
 
 import pytest
-
 from stateloom.core.config import PIIRule, StateLoomConfig
 from stateloom.core.errors import StateLoomPIIBlockedError
 from stateloom.core.session import Session
@@ -295,7 +294,7 @@ class TestBlockOldPIIStripped:
             await scanner._do_process(ctx2, _passthrough)
 
     async def test_assistant_prefill_list_content_stripped_during_cooldown(self):
-        """CLI sends SSN + list-format assistant prefill during cooldown → all stripped → blocked."""
+        """CLI sends SSN + list-format assistant prefill during cooldown."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[
@@ -430,8 +429,8 @@ class TestRedactDedup:
         assert len(ctx.events) == 1
         assert "test@secret.com" not in ctx.request_kwargs["messages"][0]["content"]
 
-    async def test_old_redact_creates_event_again(self):
-        """Old content with REDACT PII → re-redacted with new event."""
+    async def test_old_redact_suppresses_duplicate_event(self):
+        """Old content with REDACT PII → re-redacted silently (no dup event)."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.REDACT)],
@@ -454,8 +453,38 @@ class TestRedactDedup:
             session=session,
         )
         await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.events) == 1
+        # Duplicate event suppressed — same value already seen
+        assert len(ctx2.events) == 0
+        # Content is still redacted even without an event
         assert "test@secret.com" not in ctx2.request_kwargs["messages"][0]["content"]
+
+    async def test_new_redact_value_creates_event(self):
+        """A NEW email address in history still creates an event."""
+        config = StateLoomConfig(
+            pii_enabled=True,
+            pii_rules=[PIIRule(pattern="email", mode=PIIMode.REDACT)],
+        )
+        scanner = PIIScannerMiddleware(config)
+        session = Session(id="s1")
+
+        ctx1 = _make_ctx(
+            [{"role": "user", "content": "My email is test@secret.com"}],
+            session=session,
+        )
+        await scanner._do_process(ctx1, _passthrough)
+        assert len(ctx1.events) == 1
+
+        ctx2 = _make_ctx(
+            [
+                {"role": "user", "content": "My email is test@secret.com"},
+                {"role": "user", "content": "Also: other@secret.com"},
+            ],
+            session=session,
+        )
+        await scanner._do_process(ctx2, _passthrough)
+        # Old value suppressed, but new value (other@secret.com) creates event
+        assert len(ctx2.events) == 1
+        assert ctx2.events[0].metadata.get("redacted_preview", "").startswith("o")
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +493,7 @@ class TestRedactDedup:
 
 
 class TestAuditDedup:
-    """AUDIT mode creates events on every call."""
+    """AUDIT mode deduplicates events for already-seen PII values."""
 
     async def test_first_audit_creates_event(self):
         config = StateLoomConfig(
@@ -481,8 +510,8 @@ class TestAuditDedup:
         await scanner._do_process(ctx, _passthrough)
         assert len(ctx.events) == 1
 
-    async def test_old_audit_creates_event_again(self):
-        """Same PII on second call still creates an event."""
+    async def test_old_audit_suppresses_duplicate_event(self):
+        """Same PII in history on second call → no duplicate event."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.AUDIT)],
@@ -504,10 +533,39 @@ class TestAuditDedup:
             session=session,
         )
         await scanner._do_process(ctx2, _passthrough)
+        # Duplicate event suppressed — same value already seen in history
+        assert len(ctx2.events) == 0
+
+    async def test_new_audit_value_in_active_turn_creates_event(self):
+        """Same PII typed again in the active turn → event emitted."""
+        config = StateLoomConfig(
+            pii_enabled=True,
+            pii_rules=[PIIRule(pattern="email", mode=PIIMode.AUDIT)],
+        )
+        scanner = PIIScannerMiddleware(config)
+        session = Session(id="s1")
+
+        ctx1 = _make_ctx(
+            [{"role": "user", "content": "Email: user@example.com"}],
+            session=session,
+        )
+        await scanner._do_process(ctx1, _passthrough)
+        assert len(ctx1.events) == 1
+
+        # Same email in both history AND active turn
+        ctx2 = _make_ctx(
+            [
+                {"role": "user", "content": "Email: user@example.com"},
+                {"role": "user", "content": "Repeat: user@example.com"},
+            ],
+            session=session,
+        )
+        await scanner._do_process(ctx2, _passthrough)
+        # History dup suppressed, but active turn always emits
         assert len(ctx2.events) == 1
 
     async def test_multiple_pii_values_create_events(self):
-        """Multiple PII values across messages all create events."""
+        """Multiple distinct PII values across messages all create events."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.AUDIT)],
@@ -529,7 +587,8 @@ class TestAuditDedup:
             session=session,
         )
         await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.events) == 2
+        # first@ suppressed (already seen), second@ is new → 1 event
+        assert len(ctx2.events) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -654,10 +713,10 @@ class TestCacheControlIgnored:
 
 
 class TestSystemPromptDedup:
-    """System prompt scanning creates events on every call."""
+    """System prompt scanning deduplicates events for already-seen PII."""
 
-    async def test_same_system_prompt_scanned_every_call(self):
-        """Same system prompt PII creates events on each call."""
+    async def test_same_system_prompt_suppressed_on_second_call(self):
+        """Same system prompt PII → event on first call, suppressed on second."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.AUDIT)],
@@ -682,7 +741,8 @@ class TestSystemPromptDedup:
             system="Contact support@company.com for help",
         )
         await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.events) == 1
+        # Duplicate suppressed — same system prompt PII already seen
+        assert len(ctx2.events) == 0
 
     async def test_changed_system_prompt_rescanned(self):
         config = StateLoomConfig(
@@ -1012,7 +1072,7 @@ class TestFormatChangeRobustness:
         assert len(ctx2.events) == 0
 
     async def test_redact_across_format_change(self):
-        """Email in string then list-of-blocks → event on every call."""
+        """Email in string then list-of-blocks → dup suppressed (same hash)."""
         config = StateLoomConfig(
             pii_enabled=True,
             pii_rules=[PIIRule(pattern="email", mode=PIIMode.REDACT)],
@@ -1028,7 +1088,7 @@ class TestFormatChangeRobustness:
         await scanner._do_process(ctx1, _passthrough)
         assert len(ctx1.events) == 1
 
-        # Turn 2: same email in list-of-blocks format
+        # Turn 2: same email in list-of-blocks format (history message)
         ctx2 = _make_ctx(
             [
                 {
@@ -1042,11 +1102,11 @@ class TestFormatChangeRobustness:
             session=session,
         )
         await scanner._do_process(ctx2, _passthrough)
-        assert len(ctx2.events) == 1
+        # Same value hash → duplicate event suppressed
+        assert len(ctx2.events) == 0
 
     async def test_no_raw_pii_in_metadata(self):
         """Verify only SHA-256 hex digests in metadata, no raw PII."""
-        import hashlib as _hashlib
 
         config = StateLoomConfig(
             pii_enabled=True,
@@ -1327,7 +1387,7 @@ class TestSystemReminderFiltering:
         )
         result = await scanner._do_process(ctx2, _passthrough)
         assert result == "LLM_RESPONSE"
-        # Message was NOT stripped and NOT blocked — system-reminder content invisible to PII scanner
+        # Message was NOT stripped/blocked — system-reminder invisible to PII scanner
         assert len(ctx2.request_kwargs["messages"]) == 1
         assert len(ctx2.events) == 0
 

@@ -589,6 +589,9 @@ class PIIScannerMiddleware:
         blocked_hashes: set[str] = set(
             ctx.session.metadata.get("_pii_blocked_hashes", []),
         )
+        redacted_hashes: set[str] = set(
+            ctx.session.metadata.get("_pii_redacted_hashes", []),
+        )
 
         # Snapshot of PII blocked in *previous* requests — used to
         # distinguish cross-request re-blocks from same-request duplicates.
@@ -707,43 +710,56 @@ class PIIScannerMiddleware:
                             blocked_matches.append(match)
 
                 elif mode == PIIMode.REDACT:
-                    event = PIIDetectionEvent(
-                        session_id=ctx.session.id,
-                        step=ctx.session.step_counter,
-                        pii_type=match.pattern_name,
-                        mode=mode.value,
-                        pii_field=match.field,
-                        action_taken=_MODE_TO_ACTION[mode],
-                        metadata={
-                            "redacted_preview": _mask_pii_text(
-                                match.matched_text,
-                                match.pattern_name,
-                            ),
-                            "match_length": len(match.matched_text),
-                        },
-                    )
-                    ctx.events.append(event)
-                    ctx.session.add_pii_detection()
+                    # Always redact the content, but only emit an event
+                    # if this is (a) the active turn, or (b) a NEW PII
+                    # value we haven't seen before.  Same-value PII in
+                    # history messages (re-sent by the CLI) is silently
+                    # redacted without a duplicate event.
+                    emit_redact_event = is_active_turn or vh not in redacted_hashes
+                    if emit_redact_event:
+                        event = PIIDetectionEvent(
+                            session_id=ctx.session.id,
+                            step=ctx.session.step_counter,
+                            pii_type=match.pattern_name,
+                            mode=mode.value,
+                            pii_field=match.field,
+                            action_taken=_MODE_TO_ACTION[mode],
+                            metadata={
+                                "redacted_preview": _mask_pii_text(
+                                    match.matched_text,
+                                    match.pattern_name,
+                                ),
+                                "match_length": len(match.matched_text),
+                            },
+                        )
+                        ctx.events.append(event)
+                        ctx.session.add_pii_detection()
                     redact_matches.append(match)
+                    redacted_hashes.add(vh)
 
                 elif mode == PIIMode.AUDIT:
-                    event = PIIDetectionEvent(
-                        session_id=ctx.session.id,
-                        step=ctx.session.step_counter,
-                        pii_type=match.pattern_name,
-                        mode=mode.value,
-                        pii_field=match.field,
-                        action_taken=_MODE_TO_ACTION[mode],
-                        metadata={
-                            "redacted_preview": _mask_pii_text(
-                                match.matched_text,
-                                match.pattern_name,
-                            ),
-                            "match_length": len(match.matched_text),
-                        },
-                    )
-                    ctx.events.append(event)
-                    ctx.session.add_pii_detection()
+                    # Same dedup as REDACT — suppress duplicate events
+                    # for already-seen PII values in history messages.
+                    emit_audit_event = is_active_turn or vh not in redacted_hashes
+                    if emit_audit_event:
+                        event = PIIDetectionEvent(
+                            session_id=ctx.session.id,
+                            step=ctx.session.step_counter,
+                            pii_type=match.pattern_name,
+                            mode=mode.value,
+                            pii_field=match.field,
+                            action_taken=_MODE_TO_ACTION[mode],
+                            metadata={
+                                "redacted_preview": _mask_pii_text(
+                                    match.matched_text,
+                                    match.pattern_name,
+                                ),
+                                "match_length": len(match.matched_text),
+                            },
+                        )
+                        ctx.events.append(event)
+                        ctx.session.add_pii_detection()
+                    redacted_hashes.add(vh)
 
         # --- System prompt ---
         if isinstance(system, str) and system:
@@ -773,46 +789,55 @@ class PIIScannerMiddleware:
                     blocked_matches.append(match)
                     blocked_hashes.add(vh)
                 elif mode == PIIMode.REDACT:
-                    event = PIIDetectionEvent(
-                        session_id=ctx.session.id,
-                        step=ctx.session.step_counter,
-                        pii_type=match.pattern_name,
-                        mode=mode.value,
-                        pii_field=match.field,
-                        action_taken=_MODE_TO_ACTION[mode],
-                        metadata={
-                            "redacted_preview": _mask_pii_text(
-                                match.matched_text,
-                                match.pattern_name,
-                            ),
-                            "match_length": len(match.matched_text),
-                        },
-                    )
-                    ctx.events.append(event)
-                    ctx.session.add_pii_detection()
+                    # System prompts are resent on every turn — suppress
+                    # duplicate events for already-seen PII values.
+                    emit_redact_event = vh not in redacted_hashes
+                    if emit_redact_event:
+                        event = PIIDetectionEvent(
+                            session_id=ctx.session.id,
+                            step=ctx.session.step_counter,
+                            pii_type=match.pattern_name,
+                            mode=mode.value,
+                            pii_field=match.field,
+                            action_taken=_MODE_TO_ACTION[mode],
+                            metadata={
+                                "redacted_preview": _mask_pii_text(
+                                    match.matched_text,
+                                    match.pattern_name,
+                                ),
+                                "match_length": len(match.matched_text),
+                            },
+                        )
+                        ctx.events.append(event)
+                        ctx.session.add_pii_detection()
                     redact_matches.append(match)
+                    redacted_hashes.add(vh)
                 elif mode == PIIMode.AUDIT:
-                    event = PIIDetectionEvent(
-                        session_id=ctx.session.id,
-                        step=ctx.session.step_counter,
-                        pii_type=match.pattern_name,
-                        mode=mode.value,
-                        pii_field=match.field,
-                        action_taken=_MODE_TO_ACTION[mode],
-                        metadata={
-                            "redacted_preview": _mask_pii_text(
-                                match.matched_text,
-                                match.pattern_name,
-                            ),
-                            "match_length": len(match.matched_text),
-                        },
-                    )
-                    ctx.events.append(event)
-                    ctx.session.add_pii_detection()
+                    emit_audit_event = vh not in redacted_hashes
+                    if emit_audit_event:
+                        event = PIIDetectionEvent(
+                            session_id=ctx.session.id,
+                            step=ctx.session.step_counter,
+                            pii_type=match.pattern_name,
+                            mode=mode.value,
+                            pii_field=match.field,
+                            action_taken=_MODE_TO_ACTION[mode],
+                            metadata={
+                                "redacted_preview": _mask_pii_text(
+                                    match.matched_text,
+                                    match.pattern_name,
+                                ),
+                                "match_length": len(match.matched_text),
+                            },
+                        )
+                        ctx.events.append(event)
+                        ctx.session.add_pii_detection()
+                    redacted_hashes.add(vh)
 
-        # Persist blocked hashes immediately so they survive block errors
-        # and upstream failures.
+        # Persist blocked + redacted hashes immediately so they survive
+        # block errors and upstream failures.
         ctx.session.metadata["_pii_blocked_hashes"] = list(blocked_hashes)
+        ctx.session.metadata["_pii_redacted_hashes"] = list(redacted_hashes)
         if self._store:
             try:
                 self._store.save_session(ctx.session)

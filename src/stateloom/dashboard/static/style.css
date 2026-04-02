@@ -424,6 +424,8 @@ h3 {
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.3px;
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
 }
 
 .pii-action-blocked {
@@ -443,8 +445,9 @@ h3 {
 
 .pii-type-email { background: rgba(167, 139, 250, 0.15); color: #a78bfa; }
 .pii-type-ssn, .pii-type-social_security { background: rgba(248, 113, 113, 0.15); color: #f87171; }
-.pii-type-phone, .pii-type-phone_number { background: rgba(52, 211, 153, 0.15); color: #34d399; }
+.pii-type-phone, .pii-type-phone_number, .pii-type-phone_us, .pii-type-phone_eu { background: rgba(52, 211, 153, 0.15); color: #34d399; }
 .pii-type-credit_card { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
+.pii-type-iban { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
 
 .pii-preview {
     font-family: var(--font-mono);

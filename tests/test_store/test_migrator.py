@@ -86,7 +86,7 @@ class TestFreshDatabase:
         try:
             run_migrations(url)
             version = _get_alembic_version(path)
-            assert version == "009"
+            assert version == "010"
         finally:
             os.unlink(path)
 
@@ -135,7 +135,7 @@ class TestExistingDatabase:
 
             # Verify stamped at head
             version = _get_alembic_version(path)
-            assert version == "009"
+            assert version == "010"
 
             # Verify data intact (tables still exist)
             tables = _get_tables(path)
@@ -180,7 +180,7 @@ class TestIdempotency:
             # Second run should be a no-op
             run_migrations(url)
             version = _get_alembic_version(path)
-            assert version == "009"
+            assert version == "010"
         finally:
             os.unlink(path)
 

@@ -1230,6 +1230,7 @@ class Gate:
                 session.cache_hits = existing.cache_hits
                 session.cache_savings = existing.cache_savings
                 session.pii_detections = existing.pii_detections
+                session.guardrail_detections = existing.guardrail_detections
                 session.step_counter = existing.step_counter
                 session.estimated_api_cost = existing.estimated_api_cost
                 # Metadata merge order: stored values first, then current-request
@@ -1367,6 +1368,7 @@ class Gate:
                 session.cache_hits = existing.cache_hits
                 session.cache_savings = existing.cache_savings
                 session.pii_detections = existing.pii_detections
+                session.guardrail_detections = existing.guardrail_detections
                 session.step_counter = existing.step_counter
                 session.estimated_api_cost = existing.estimated_api_cost
                 # Metadata merge: stored first, current overlays on top

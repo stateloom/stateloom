@@ -61,8 +61,21 @@ class Store(Protocol):
         event_type: str | None = None,
         limit: int = 1000,
         offset: int = 0,
+        desc: bool = False,
     ) -> list[Event]:
         """Get events for a session, optionally filtered by type."""
+        ...
+
+    def count_events(
+        self,
+        session_id: str = "",
+        event_type: str | None = None,
+    ) -> int:
+        """Count events matching the given filters without fetching rows."""
+        ...
+
+    def get_pii_stats(self) -> dict[str, Any]:
+        """Aggregate PII detection stats via efficient queries."""
         ...
 
     def get_global_stats(self) -> dict[str, Any]:

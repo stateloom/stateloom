@@ -1,7 +1,6 @@
 """Tests for the experiment assigner."""
 
 import pytest
-
 from stateloom.core.types import AssignmentStrategy, ExperimentStatus
 from stateloom.experiment.assigner import ExperimentAssigner
 from stateloom.experiment.models import Experiment, VariantConfig
@@ -175,12 +174,52 @@ class TestDoubleAssignPrevention:
         store.save_experiment(experiment)
         assigner.register(experiment)
 
-        first = assigner.assign("s1")
+        first = assigner.assign("s1", experiment_id=experiment.id)
         assert first is not None
 
         # Even with explicit variant_name, existing assignment is returned
-        second = assigner.assign("s1", variant_name="different")
+        # when the experiment is the same.
+        second = assigner.assign("s1", experiment_id=experiment.id, variant_name="different")
         assert second.variant_name == first.variant_name
+
+
+class TestCrossExperimentReassignment:
+    """A session assigned to experiment A can be reassigned to experiment B."""
+
+    def test_reassign_to_new_experiment(self, store):
+        assigner = ExperimentAssigner(store)
+        exp1 = Experiment(
+            id="exp1",
+            name="first",
+            status=ExperimentStatus.RUNNING,
+            variants=[VariantConfig(name="v1", weight=1.0)],
+        )
+        exp2 = Experiment(
+            id="exp2",
+            name="second",
+            status=ExperimentStatus.RUNNING,
+            variants=[VariantConfig(name="v2", weight=1.0)],
+        )
+        store.save_experiment(exp1)
+        store.save_experiment(exp2)
+        assigner.register(exp1)
+        assigner.register(exp2)
+
+        first = assigner.assign("s1", experiment_id="exp1")
+        assert first is not None
+        assert first.experiment_id == "exp1"
+        assert first.variant_name == "v1"
+
+        # Same session, different experiment — should get a new assignment
+        second = assigner.assign("s1", experiment_id="exp2")
+        assert second is not None
+        assert second.experiment_id == "exp2"
+        assert second.variant_name == "v2"
+
+        # Store should reflect the latest assignment
+        stored = store.get_assignment("s1")
+        assert stored is not None
+        assert stored.experiment_id == "exp2"
 
 
 class TestNoRunningExperiment:
