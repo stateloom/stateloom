@@ -664,6 +664,15 @@ class SQLiteStore:
         )
 
     def save_session(self, session: Session) -> None:
+        # TODO(race-condition): INSERT OR REPLACE overwrites the entire session row.
+        # When concurrent requests share the same session_id (e.g. Claude CLI sends
+        # streaming + non-streaming in parallel), each reads accumulators at request
+        # start and writes absolute values at request end — the later write can
+        # overwrite the earlier one's token/cost updates.  Events are always saved
+        # correctly so data is recoverable, but session totals (budget enforcement,
+        # dashboard summaries) can be stale.  Fix: switch to incremental UPDATE
+        # (SET total_cost = total_cost + delta) and track per-request deltas in
+        # Session, or use a read-merge-write inside a single transaction.
         with self._lock:
             self._conn.execute(
                 """INSERT OR REPLACE INTO sessions

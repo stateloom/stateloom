@@ -588,8 +588,15 @@ async def _handle_streaming_passthrough(
 
 
 def _track_stream_usage(chunk_str: str, ctx: Any) -> None:
-    """Parse Anthropic SSE events to extract token usage for cost tracking."""
+    """Parse Anthropic SSE events to extract token usage for cost tracking.
+
+    Only ``message_start`` (prompt tokens) and ``message_delta`` (completion
+    tokens) carry usage data.  Skip ``json.loads`` on content-delta / ping
+    chunks that can never contain token counts.
+    """
     if ctx is None:
+        return
+    if "message_start" not in chunk_str and "message_delta" not in chunk_str:
         return
     try:
         for line in chunk_str.split("\n"):

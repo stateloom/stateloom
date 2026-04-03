@@ -390,6 +390,8 @@ class PostgresStore:
     # --- Session methods ---
 
     def save_session(self, session: Session) -> None:
+        # TODO(race-condition): ON CONFLICT UPDATE overwrites the entire session row.
+        # Same race as sqlite_store.py — see that file for details and proposed fix.
         with self._pool.connection() as conn:
             conn.execute(
                 """INSERT INTO sessions

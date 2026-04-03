@@ -2145,6 +2145,24 @@ function renderWaterfallTimeline(events, session) {
     if (!tbody) return;
     tbody.innerHTML = '';
 
+    // Show an informational banner for CLI sessions explaining duplicate requests
+    const container = document.getElementById('waterfall-container');
+    const existingBanner = container?.querySelector('.cli-duplicate-banner');
+    if (existingBanner) existingBanner.remove();
+    if (container && session && session.name) {
+        const name = session.name.toLowerCase();
+        if (name.includes('cli') || name.includes('claude code') || name.includes('codex')) {
+            const banner = document.createElement('div');
+            banner.className = 'cli-duplicate-banner';
+            banner.innerHTML =
+                '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0;margin-top:1px;">' +
+                '<path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 3.75a.75.75 0 011.5 0v4a.75.75 0 01-1.5 0v-4zm.75 7a.75.75 0 110-1.5.75.75 0 010 1.5z"/>' +
+                '</svg>' +
+                '<span>CLI sessions show paired rows per prompt (planning + main model, or streaming + non-streaming duplicates). This is normal.</span>';
+            container.insertBefore(banner, container.firstChild);
+        }
+    }
+
     if (!events || events.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" class="empty-state" style="padding:32px;">No events yet</td></tr>';
         return;

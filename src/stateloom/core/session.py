@@ -284,6 +284,13 @@ class SessionManager:
 
     def __init__(self) -> None:
         """Initialize the session manager with an empty registry."""
+        # TODO(memory-leak): _sessions grows indefinitely — completed/errored
+        # sessions are never evicted.  Each entry is small (~1-2KB) so this is
+        # only a concern for long-running servers with high session throughput.
+        # Fix: add TTL-based eviction (e.g. remove terminal sessions after 30
+        # min).  Note: simple eviction-on-end would break cancel_session() /
+        # suspend_session() / signal_session() which look up in-memory sessions
+        # for _cancelled / _suspend_event state.
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
         self._default_budget: float | None = None

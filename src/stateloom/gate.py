@@ -1219,6 +1219,10 @@ class Gate:
         # Proxy clients reuse session IDs across HTTP requests, so we must
         # restore cost/token/step counters to avoid starting from zero each
         # time the context manager is re-entered for the same session.
+        # TODO(race-condition): This read + the later save_session() are not in
+        # the same transaction.  Concurrent requests with the same session_id
+        # can read stale accumulators and overwrite each other's updates.
+        # See save_session() in sqlite_store.py for details and proposed fix.
         if session_id is not None:
             existing = self.store.get_session(session_id)
             if existing is not None:
@@ -1357,6 +1361,10 @@ class Gate:
         )
 
         # Resume accumulators — see sync session() for rationale.
+        # TODO(race-condition): This read + the later save_session() are not in
+        # the same transaction.  Concurrent requests with the same session_id
+        # can read stale accumulators and overwrite each other's updates.
+        # See save_session() in sqlite_store.py for details and proposed fix.
         if session_id is not None:
             existing = self.store.get_session(session_id)
             if existing is not None:

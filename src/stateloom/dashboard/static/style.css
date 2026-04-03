@@ -2117,6 +2117,17 @@ h3 {
     box-shadow: var(--shadow-card);
 }
 
+.cli-duplicate-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: rgba(34, 211, 238, 0.06);
+    border-bottom: 1px solid var(--border);
+}
+
 .waterfall-table {
     width: 100%;
     border-collapse: separate;

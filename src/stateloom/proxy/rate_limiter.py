@@ -111,6 +111,12 @@ class ProxyRateLimiter:
             bucket.queue_size += 1
 
         # Lock released — wait for slot
+        # TODO(thread-pool): _wait_for_slot blocks a thread pool thread for up
+        # to queue_timeout (default 5s).  With max_queue_size=10 this can hold
+        # 10 threads simultaneously, risking exhaustion of Python's default
+        # executor (~8-12 workers).  Rewrite with asyncio.Event / asyncio.sleep
+        # to avoid thread pool usage entirely.  Low priority — only fires when
+        # VK rate_limit_tps is configured and actively exceeded.
         assert req is not None
         loop = asyncio.get_running_loop()
         slot_acquired = await loop.run_in_executor(None, self._wait_for_slot, req, bucket)
