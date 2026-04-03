@@ -91,7 +91,11 @@ _SCHEMA_TABLES = [
         s_agent_version_id TEXT DEFAULT '',
         s_agent_version_number INTEGER DEFAULT 0,
         s_agent_name TEXT DEFAULT '',
-        s_transport TEXT DEFAULT ''
+        s_transport TEXT DEFAULT '',
+        cost_by_model_json TEXT,
+        tokens_by_model_json TEXT,
+        guardrail_detections INTEGER NOT NULL DEFAULT 0,
+        end_user TEXT DEFAULT ''
     )
     """,
     # events

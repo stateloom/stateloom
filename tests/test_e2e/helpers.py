@@ -5,13 +5,16 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from openai.types.chat import ChatCompletion
-
 from stateloom.core.event import ShadowDraftEvent
 from stateloom.core.session import Session
 from stateloom.core.types import Provider
 from stateloom.gate import Gate
 from stateloom.local.client import OllamaResponse
+
+try:
+    from openai.types.chat import ChatCompletion as _ChatCompletion
+except ImportError:
+    _ChatCompletion = None  # type: ignore[assignment,misc]
 
 
 def make_openai_response(
@@ -19,9 +22,11 @@ def make_openai_response(
     model: str = "gpt-3.5-turbo",
     prompt_tokens: int = 10,
     completion_tokens: int = 5,
-) -> ChatCompletion:
+) -> Any:
     """Build a minimal OpenAI ChatCompletion object."""
-    return ChatCompletion.model_validate(
+    if _ChatCompletion is None:
+        raise ImportError("openai is required for make_openai_response")
+    return _ChatCompletion.model_validate(
         {
             "id": "chatcmpl-test",
             "object": "chat.completion",
