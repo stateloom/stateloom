@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
@@ -300,8 +301,9 @@ class TestGatePromptCleanup:
 
         gate.store.cleanup_request_messages = MagicMock(return_value=0)  # type: ignore[attr-defined]
 
-        # First call should run
-        gate._last_prompt_cleanup = 0.0
+        # First call should run — use a timestamp far enough in the past
+        # (time.monotonic() may be < 600 on freshly-booted CI containers)
+        gate._last_prompt_cleanup = time.monotonic() - 1000.0
         gate._maybe_cleanup_prompt_payloads()
         assert gate.store.cleanup_request_messages.call_count == 1  # type: ignore[attr-defined]
 

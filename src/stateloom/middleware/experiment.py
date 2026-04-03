@@ -158,8 +158,10 @@ class ExperimentMiddleware:
             from stateloom.chat import _resolve_provider
 
             new_provider = _resolve_provider(new_model)
-            # Normalise to plain str for comparison (Provider enum extends str)
-            return str(new_provider) != str(current_provider)
+            # Use .value for enums (str(Provider.X) returns "Provider.X", not "openai")
+            a = getattr(new_provider, "value", new_provider)
+            b = getattr(current_provider, "value", current_provider)
+            return a != b
         except Exception:
             logger.debug("Provider resolution failed for model %s", new_model, exc_info=True)
             return False
