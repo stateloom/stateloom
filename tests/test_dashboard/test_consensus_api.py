@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from stateloom.core.event import ConsensusEvent, DebateRoundEvent
 from stateloom.dashboard.api import create_api_router
 from stateloom.store.memory_store import MemoryStore

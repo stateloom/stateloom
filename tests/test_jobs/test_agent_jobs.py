@@ -6,6 +6,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from stateloom.agent.models import Agent, AgentVersion
 from stateloom.core.job import Job
 from stateloom.core.types import AgentStatus, JobStatus

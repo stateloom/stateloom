@@ -7,6 +7,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
+
 from stateloom.cli import main
 from stateloom.cli.doctor_command import _run_checks, doctor
 

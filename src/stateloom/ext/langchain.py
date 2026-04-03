@@ -45,14 +45,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger("stateloom.ext.langchain")
 
 try:
-    from langchain_core.callbacks import BaseCallbackHandler
-    from langchain_core.outputs import LLMResult
+    from langchain_core.callbacks import BaseCallbackHandler  # type: ignore[import-not-found]
+    from langchain_core.outputs import LLMResult  # type: ignore[import-not-found]
 
     _HAS_LANGCHAIN = True
 except ImportError:
     _HAS_LANGCHAIN = False
-    BaseCallbackHandler = object  # type: ignore[assignment,misc]  # Stub when langchain not installed
-    LLMResult = Any  # type: ignore[assignment,misc]  # Stub when langchain not installed
+    BaseCallbackHandler = object  # type: ignore[assignment,misc]
+    LLMResult = Any  # type: ignore[assignment,misc]
 
 # ---------------------------------------------------------------------------
 # Provider mapping from LangChain serialized id path
@@ -192,7 +192,7 @@ def _is_langchain_cache_hit(response: Any) -> bool:
 # ---------------------------------------------------------------------------
 if _HAS_LANGCHAIN:
 
-    class StateLoomCallbackHandler(BaseCallbackHandler):
+    class StateLoomCallbackHandler(BaseCallbackHandler):  # type: ignore[misc]
         """LangChain callback handler that records events in StateLoom.
 
         Tracks LLM calls (with cost / token / latency data) and tool calls.

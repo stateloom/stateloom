@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from stateloom.core.config import StateLoomConfig
 from stateloom.gate import Gate
 
@@ -41,6 +42,7 @@ def gate_with_loop():
 def client(gate):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+
     from stateloom.dashboard.api import create_api_router
 
     app = FastAPI()
@@ -53,6 +55,7 @@ def client(gate):
 def client_with_loop(gate_with_loop):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+
     from stateloom.dashboard.api import create_api_router
 
     app = FastAPI()

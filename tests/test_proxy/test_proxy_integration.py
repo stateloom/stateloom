@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
+
 from stateloom.core.config import KillSwitchRule, PIIRule
 from stateloom.core.types import PIIMode
 from stateloom.dashboard.api import create_api_router
@@ -28,7 +29,6 @@ from stateloom.proxy.virtual_key import (
     make_key_preview,
     make_virtual_key_id,
 )
-
 from tests.test_e2e.conftest import e2e_gate  # noqa: F401
 from tests.test_production.helpers import make_openai_response
 

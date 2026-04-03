@@ -58,7 +58,7 @@ litellm = ["litellm>=1.40"]
 genai = ["google-genai>=1.0"]
 all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]", "stateloom[auth]", "stateloom[genai]"]
 typecheck = [
-    "mypy>=1.5",
+    "mypy>=1.19,<2.0",
     "openai>=1.0",
     "anthropic>=0.39",
     "google-generativeai>=0.4",
@@ -73,8 +73,8 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.0",
-    "ruff>=0.1",
-    "mypy>=1.5",
+    "ruff>=0.14,<1.0",
+    "mypy>=1.19,<2.0",
     "respx>=0.20",
 ]
 
@@ -115,6 +115,10 @@ python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["stateloom.ext.langchain", "stateloom.ext.langgraph"]
+warn_unused_ignores = false
 
 [tool.bandit]
 exclude_dirs = ["tests"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from stateloom.compliance.legal_rules import get_legal_rule
 from stateloom.compliance.profiles import gdpr_profile
 from stateloom.core.config import ComplianceProfile, StateLoomConfig

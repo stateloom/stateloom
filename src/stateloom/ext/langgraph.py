@@ -52,7 +52,7 @@ def patch_langgraph_tools(gate: Gate | None = None) -> None:
         return
 
     try:
-        from langgraph.prebuilt import ToolNode
+        from langgraph.prebuilt import ToolNode  # type: ignore[import-not-found]
     except ImportError:
         logger.warning(
             "[StateLoom] LangGraph not installed. Install with: pip install stateloom[langgraph]"
@@ -87,7 +87,7 @@ def patch_langgraph_tools(gate: Gate | None = None) -> None:
             finally:
                 _record_tool(tool_name, (time.perf_counter() - start) * 1000)
 
-        ToolNode._execute_tool_sync = patched_sync  # type: ignore[assignment]
+        ToolNode._execute_tool_sync = patched_sync  # type: ignore[assignment,attr-defined]
         register_patch(
             ToolNode,
             "_execute_tool_sync",
@@ -108,7 +108,7 @@ def patch_langgraph_tools(gate: Gate | None = None) -> None:
             finally:
                 _record_tool(tool_name, (time.perf_counter() - start) * 1000)
 
-        ToolNode._execute_tool_async = patched_async  # type: ignore[assignment]
+        ToolNode._execute_tool_async = patched_async  # type: ignore[assignment,attr-defined]
         register_patch(
             ToolNode,
             "_execute_tool_async",

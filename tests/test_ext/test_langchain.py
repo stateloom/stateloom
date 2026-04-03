@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+
 import stateloom
 from stateloom.core.event import LLMCallEvent, ToolCallEvent
 

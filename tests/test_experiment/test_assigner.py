@@ -1,6 +1,7 @@
 """Tests for the experiment assigner."""
 
 import pytest
+
 from stateloom.core.types import AssignmentStrategy, ExperimentStatus
 from stateloom.experiment.assigner import ExperimentAssigner
 from stateloom.experiment.models import Experiment, VariantConfig

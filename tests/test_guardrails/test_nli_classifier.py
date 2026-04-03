@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+
 from stateloom.guardrails.nli_classifier import NLIInjectionClassifier
 
 

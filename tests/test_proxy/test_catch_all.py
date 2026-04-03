@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 from fastapi import APIRouter, FastAPI
 from httpx import ASGITransport, AsyncClient
+
 from stateloom.proxy.catch_all import (
     _detect_provider,
     _error_for_provider,

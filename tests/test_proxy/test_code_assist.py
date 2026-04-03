@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from stateloom.core.config import StateLoomConfig
 from stateloom.core.errors import (
     StateLoomBudgetError,
@@ -489,9 +490,9 @@ class TestCodeAssistErrorFormat:
                 headers={"Authorization": "Bearer oauth-token"},
             )
 
-            assert (
-                resp.status_code == expected_status
-            ), f"Expected {expected_status} for {type(error).__name__}, got {resp.status_code}"
+            assert resp.status_code == expected_status, (
+                f"Expected {expected_status} for {type(error).__name__}, got {resp.status_code}"
+            )
             data = resp.json()
             assert "error" in data
             assert data["error"]["status"] == expected_status_str

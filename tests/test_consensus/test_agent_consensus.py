@@ -6,6 +6,7 @@ import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from stateloom.consensus.models import (
     ConsensusConfig,
     ConsensusResult,

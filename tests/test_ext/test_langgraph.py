@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 import stateloom
 from stateloom.core.event import ToolCallEvent
 from stateloom.gate import Gate

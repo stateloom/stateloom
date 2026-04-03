@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from stateloom.core.types import Provider
 from stateloom.intercept.adapters.genai_adapter import GenaiAdapter
 
