@@ -28,7 +28,7 @@ jobs:
           python-version: "3.10"
 
       - name: Install ruff
-        run: pip install ruff>=0.1
+        run: pip install "ruff>=0.14,<1.0"
 
       - name: Ruff check
         run: ruff check src/ tests/

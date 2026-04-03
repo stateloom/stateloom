@@ -117,7 +117,15 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["stateloom.ext.langchain", "stateloom.ext.langgraph"]
+module = [
+    "stateloom.ext.langchain",
+    "stateloom.ext.langgraph",
+    "stateloom.intercept.adapters.gemini_adapter",
+    "stateloom.jobs.processor",
+    "stateloom.chat",
+    "stateloom.auth.jwt",
+    "stateloom.auth.oidc",
+]
 warn_unused_ignores = false
 
 [tool.bandit]

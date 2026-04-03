@@ -30,7 +30,7 @@ def install(ver: str) -> None:
     click.echo(f"Installing Ollama ({ver})...")
 
     with click.progressbar(length=100, label="Downloading") as bar:
-        last_pct = [0]
+        last_pct: list[int] = [0]
 
         def _progress(downloaded: int, total: int) -> None:
             if total > 0:

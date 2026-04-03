@@ -224,7 +224,7 @@ class OIDCClient:
         if token_iss != self.issuer_url:
             raise OIDCError(f"Issuer mismatch: {token_iss} != {self.issuer_url}")
 
-        return cast(dict[str, Any], claims)
+        return cast(dict[str, Any], claims)  # type: ignore[redundant-cast]
 
     @staticmethod
     def extract_groups(claims: dict[str, Any], group_claim: str = "") -> list[str]:

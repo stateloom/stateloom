@@ -165,6 +165,6 @@ def decode_refresh_token(
         payload = pyjwt.decode(token, secret, algorithms=[algorithm])
         if payload.get("type") != "refresh":
             return None
-        return cast(dict[str, Any], payload)
+        return cast(dict[str, Any], payload)  # type: ignore[redundant-cast]
     except Exception:
         return None
