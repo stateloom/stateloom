@@ -559,9 +559,9 @@ class PostgresStore:
     def save_session_with_events(self, session: Session, events: list[Event]) -> None:
         with self._pool.connection() as conn:
             with conn.transaction():
+                self._upsert_session(conn, session)
                 for event in events:
                     self._insert_event(conn, event)
-                self._upsert_session(conn, session)
 
     def _upsert_session(self, conn: Any, session: Session) -> None:
         """Insert or update a session (used within transactions)."""

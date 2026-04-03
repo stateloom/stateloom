@@ -2169,9 +2169,17 @@ __all__ = [
 import sys as _sys  # noqa: E402
 import types as _types  # noqa: E402
 
+_chat_fn = chat  # private ref — survives subpackage shadowing
+
 
 class _StateLoomModule(_types.ModuleType):
-    """Custom module class that protects `replay` from subpackage shadowing."""
+    """Custom module class that protects public names from subpackage shadowing.
+
+    When ``from stateloom.chat import Client`` runs, Python's import system sets
+    ``stateloom.chat`` to the *subpackage module*, overwriting the ``chat()``
+    function exported above.  The same applies to ``replay``.  Property
+    descriptors intercept the attribute and always return the callable.
+    """
 
     @property
     def replay(self) -> Any:
@@ -2179,8 +2187,14 @@ class _StateLoomModule(_types.ModuleType):
 
     @replay.setter
     def replay(self, value: Any) -> None:
-        # Silently ignore when Python's import system tries to set the
-        # subpackage module — the property getter always wins.
+        pass
+
+    @property
+    def chat(self) -> Any:
+        return _chat_fn
+
+    @chat.setter
+    def chat(self, value: Any) -> None:
         pass
 
 
