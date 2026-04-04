@@ -15,6 +15,9 @@ let _sessionsPageFromHash = false;  // set by handleHash to avoid resetting page
 let _piiPage = 0;
 const _piiPageSize = 100;
 let _piiTotal = 0;
+let _consensusPage = 0;
+const _consensusPageSize = 20;
+let _consensusTotal = 0;
 let _detailEventsLoaded = [];     // accumulated events for current session detail
 let _detailEventsOffset = 0;      // current offset for event loading
 let _detailEventsHasMore = false;  // whether more events are available
@@ -112,7 +115,7 @@ function switchView(view) {
     else if (view === 'observability') loadObservability();
     else if (view === 'agents') loadAgents();
     else if (view === 'jobs') loadJobs();
-    else if (view === 'consensus') loadConsensus();
+    else if (view === 'consensus') { _consensusPage = 0; loadConsensus(); }
     else if (view === 'settings') loadSettings();
     else if (view === 'server-logs') loadServerLogs();
 }
@@ -5668,11 +5671,13 @@ function renderTopModelsChart(data) {
 
 // --- Consensus ---
 async function loadConsensus() {
-    const data = await fetchJSON('/consensus-runs');
+    const offset = _consensusPage * _consensusPageSize;
+    const data = await fetchJSON(`/consensus-runs?limit=${_consensusPageSize}&offset=${offset}`);
     if (!data) return;
 
     const runs = data.runs || [];
-    document.getElementById('consensus-stat-total').textContent = runs.length;
+    _consensusTotal = data.total || 0;
+    document.getElementById('consensus-stat-total').textContent = _consensusTotal;
 
     if (runs.length > 0) {
         const avgConf = runs.reduce((s, r) => s + r.confidence, 0) / runs.length;
@@ -5686,6 +5691,8 @@ async function loadConsensus() {
         document.getElementById('consensus-stat-cost').textContent = '$0';
         document.getElementById('consensus-stat-early').textContent = '0';
     }
+
+    _updateConsensusPagination();
 
     const tbody = document.getElementById('consensus-tbody');
     tbody.innerHTML = '';
@@ -5714,6 +5721,32 @@ async function loadConsensus() {
         `;
         tbody.appendChild(tr);
     });
+}
+
+function _updateConsensusPagination() {
+    const totalPages = Math.max(1, Math.ceil(_consensusTotal / _consensusPageSize));
+    const currentPage = _consensusPage + 1;
+    const infoEl = document.getElementById('consensus-page-info');
+    const prevBtn = document.getElementById('consensus-prev-btn');
+    const nextBtn = document.getElementById('consensus-next-btn');
+    if (infoEl) infoEl.textContent = `Page ${currentPage} of ${totalPages}`;
+    if (prevBtn) prevBtn.disabled = _consensusPage <= 0;
+    if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+}
+
+function consensusPagePrev() {
+    if (_consensusPage > 0) {
+        _consensusPage--;
+        loadConsensus();
+    }
+}
+
+function consensusPageNext() {
+    const totalPages = Math.ceil(_consensusTotal / _consensusPageSize);
+    if (_consensusPage + 1 < totalPages) {
+        _consensusPage++;
+        loadConsensus();
+    }
 }
 
 async function loadConsensusDetail(sessionId) {

@@ -104,10 +104,17 @@ class SemanticComplexityClassifier:
         total = exp_c + exp_e + exp_n
         return exp_e / total
 
+    # Minimum entailment probability for either hypothesis to be considered
+    # meaningful.  When both scores fall below this, the NLI model is uncertain
+    # (most probability mass on "neutral") and the ratio is noise — return None
+    # so the auto-router falls back to heuristic scoring.
+    _MIN_ENTAILMENT = 0.10
+
     def classify(self, text: str) -> float | None:
         """Classify text complexity on a 0.0-1.0 scale.
 
-        Returns None if no NLI backend is available or on any error.
+        Returns None if no NLI backend is available, on any error, or when the
+        model is uncertain (both entailment probabilities below threshold).
         """
         try:
             if not self._lazy_init():
@@ -130,6 +137,16 @@ class SemanticComplexityClassifier:
                 # Single-score model (regression head)
                 complex_score = float(raw_scores[0])
                 simple_score = float(raw_scores[1])
+
+            # When neither hypothesis is confidently entailed, the NLI model
+            # can't distinguish complexity — fall back to heuristic scoring.
+            if complex_score < self._MIN_ENTAILMENT and simple_score < self._MIN_ENTAILMENT:
+                logger.debug(
+                    "NLI uncertain (complex=%.4f, simple=%.4f) — falling back to heuristic",
+                    complex_score,
+                    simple_score,
+                )
+                return None
 
             # Avoid division by zero
             total = complex_score + simple_score

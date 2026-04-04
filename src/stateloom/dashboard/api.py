@@ -3132,14 +3132,25 @@ def create_api_router(gate: Gate) -> APIRouter:
 
     @router.get("/consensus-runs")
     async def list_consensus_runs(
-        limit: int = Query(default=50, le=500),
+        limit: int = Query(default=20, le=500),
+        offset: int = Query(default=0, ge=0),
         strategy: str | None = Query(default=None),
     ) -> dict[str, Any]:
-        events = gate.store.get_session_events("", event_type="consensus", limit=limit)
+        if strategy:
+            # Strategy filter is applied in-memory, so fetch all and paginate after
+            all_events = gate.store.get_session_events(
+                "", event_type="consensus", limit=10000, desc=True
+            )
+            filtered = [e for e in all_events if getattr(e, "strategy", "") == strategy]
+            total = len(filtered)
+            page = filtered[offset : offset + limit]
+        else:
+            total = gate.store.count_events(event_type="consensus")
+            page = gate.store.get_session_events(
+                "", event_type="consensus", limit=limit, offset=offset, desc=True
+            )
         runs = []
-        for e in events:
-            if strategy and getattr(e, "strategy", "") != strategy:
-                continue
+        for e in page:
             runs.append(
                 {
                     "session_id": e.session_id,
@@ -3156,7 +3167,7 @@ def create_api_router(gate: Gate) -> APIRouter:
                     "timestamp": e.timestamp.isoformat(),
                 }
             )
-        return {"runs": runs, "total": len(runs)}
+        return {"runs": runs, "total": total}
 
     @router.get("/consensus-runs/{session_id}")
     async def get_consensus_run(session_id: str) -> dict[str, Any]:

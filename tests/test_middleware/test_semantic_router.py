@@ -133,7 +133,7 @@ class TestSemanticComplexityClassifier:
             assert abs(score - 0.5) < 1e-6
 
     def test_classify_with_zero_scores(self):
-        """Both scores zero should return 0.5 fallback."""
+        """Both scores zero → model uncertain, fall back to None."""
         mock_model = MagicMock()
         mock_model.predict.return_value = [0.0, 0.0]
 
@@ -143,7 +143,7 @@ class TestSemanticComplexityClassifier:
             classifier._backend = "sentence_transformers"
             classifier._initialized = True
             score = classifier.classify("test")
-            assert score == 0.5
+            assert score is None
 
 
 class TestSemanticComplexityWithSentenceTransformers:
@@ -154,30 +154,29 @@ class TestSemanticComplexityWithSentenceTransformers:
         pytest.importorskip("sentence_transformers")
 
     def test_classify_simple_prompt_low_score(self):
-        """Simple prompts should score lower than complex prompts."""
+        """Simple prompts should return a valid score or None (uncertain fallback)."""
         classifier = SemanticComplexityClassifier()
         simple_score = classifier.classify("What is 2 + 2?")
         complex_score = classifier.classify(
             "Design a distributed consensus algorithm that handles Byzantine faults "
             "and prove its correctness using formal verification methods."
         )
-        assert simple_score is not None
-        assert complex_score is not None
-        assert 0.0 <= simple_score <= 1.0
-        assert 0.0 <= complex_score <= 1.0
+        # Scores may be None when the NLI model is uncertain (both entailment
+        # probabilities below threshold) — this triggers heuristic fallback.
+        for s in (simple_score, complex_score):
+            assert s is None or 0.0 <= s <= 1.0
 
     def test_classify_complex_prompt_high_score(self):
-        """Complex prompts should produce a valid score."""
+        """Complex prompts should produce a valid score or None (uncertain)."""
         classifier = SemanticComplexityClassifier()
         score = classifier.classify(
             "Design a distributed consensus algorithm that handles Byzantine faults "
             "and prove its correctness using formal verification methods."
         )
-        assert score is not None
-        assert 0.0 <= score <= 1.0
+        assert score is None or 0.0 <= score <= 1.0
 
     def test_score_range(self):
-        """All scores should be in [0.0, 1.0] range."""
+        """All scores should be in [0.0, 1.0] range or None (uncertain)."""
         classifier = SemanticComplexityClassifier()
         prompts = [
             "Hi",
@@ -187,8 +186,7 @@ class TestSemanticComplexityWithSentenceTransformers:
         ]
         for prompt in prompts:
             score = classifier.classify(prompt)
-            assert score is not None
-            assert 0.0 <= score <= 1.0
+            assert score is None or 0.0 <= score <= 1.0
 
 
 class TestFallbackIntegration:

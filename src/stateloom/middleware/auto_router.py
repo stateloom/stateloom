@@ -312,6 +312,11 @@ class AutoRouterMiddleware:
         if self._compliance_fn:
             profile = self._compliance_fn(ctx.session.org_id, ctx.session.team_id)
             if profile and profile.block_local_routing:
+                logger.info(
+                    "Auto-routing blocked by compliance profile (%s). "
+                    "Clear with stateloom.clear_compliance() or dashboard.",
+                    profile.standard,
+                )
                 return await call_next(ctx)
 
         decision = self._should_route_local(ctx)

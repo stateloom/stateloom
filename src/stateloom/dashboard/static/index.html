@@ -1001,6 +1001,11 @@
                 </thead>
                 <tbody id="consensus-tbody"></tbody>
             </table>
+            <div id="consensus-pagination" class="pagination-controls">
+                <button onclick="consensusPagePrev()" id="consensus-prev-btn" class="btn btn-sm" disabled>&larr; Previous</button>
+                <span id="consensus-page-info" class="pagination-info">Page 1</span>
+                <button onclick="consensusPageNext()" id="consensus-next-btn" class="btn btn-sm">Next &rarr;</button>
+            </div>
 
             <div id="consensus-detail-panel" class="experiment-detail-panel" style="display:none;">
                 <div class="experiment-detail-header">
