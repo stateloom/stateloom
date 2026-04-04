@@ -367,14 +367,20 @@ async function loadSessionDetail(sessionId) {
         costSub.style.display = 'none';
     } else {
         costLabel.textContent = 'Est. Cost';
-        document.getElementById('detail-cost').textContent = `$${session.total_cost.toFixed(4)}`;
+        const displayCost = session.total_cost_with_children ?? session.total_cost;
+        document.getElementById('detail-cost').textContent = `$${displayCost.toFixed(4)}`;
         costSub.textContent = 'Prompt caching may lower actual cost';
         costSub.style.display = '';
     }
-    document.getElementById('detail-tokens').textContent = session.total_tokens.toLocaleString();
-    document.getElementById('detail-prompt-tokens').textContent = (session.total_prompt_tokens || 0).toLocaleString();
-    document.getElementById('detail-completion-tokens').textContent = (session.total_completion_tokens || 0).toLocaleString();
-    document.getElementById('detail-calls').textContent = session.call_count;
+    // Use aggregated totals (own + children) when available
+    const displayTokens = session.total_tokens_with_children ?? session.total_tokens;
+    const displayPrompt = session.total_prompt_tokens_with_children ?? session.total_prompt_tokens ?? 0;
+    const displayCompletion = session.total_completion_tokens_with_children ?? session.total_completion_tokens ?? 0;
+    const displayCalls = session.call_count_with_children ?? session.call_count;
+    document.getElementById('detail-tokens').textContent = displayTokens.toLocaleString();
+    document.getElementById('detail-prompt-tokens').textContent = displayPrompt.toLocaleString();
+    document.getElementById('detail-completion-tokens').textContent = displayCompletion.toLocaleString();
+    document.getElementById('detail-calls').textContent = displayCalls;
     document.getElementById('detail-cache-hits').textContent = session.cache_hits || 0;
     document.getElementById('detail-cache-savings').textContent = isSub ? '\u2014' : `$${(session.cache_savings || 0).toFixed(4)}`;
     document.getElementById('detail-pii-detections').textContent = session.pii_detections || 0;

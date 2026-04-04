@@ -477,6 +477,23 @@ def create_api_router(gate: Gate) -> APIRouter:
             result["suspend_reason"] = session.metadata.get("_suspend_reason", "")
             result["suspend_data"] = session.metadata.get("_suspend_data")
             result["billing_mode"] = session.metadata.get("billing_mode", "api")
+
+        # Aggregate child session stats for parent visibility
+        children = gate.store.list_child_sessions(session_id, limit=500)
+        if children:
+            child_cost = sum(c.total_cost for c in children)
+            child_tokens = sum(c.total_tokens for c in children)
+            child_prompt = sum(c.total_prompt_tokens for c in children)
+            child_completion = sum(c.total_completion_tokens for c in children)
+            child_calls = sum(c.call_count for c in children)
+            result["total_cost_with_children"] = round(session.total_cost + child_cost, 6)
+            result["total_tokens_with_children"] = session.total_tokens + child_tokens
+            result["total_prompt_tokens_with_children"] = session.total_prompt_tokens + child_prompt
+            result["total_completion_tokens_with_children"] = (
+                session.total_completion_tokens + child_completion
+            )
+            result["call_count_with_children"] = session.call_count + child_calls
+
         return result
 
     @router.get("/sessions/{session_id}/events")

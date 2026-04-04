@@ -1,13 +1,17 @@
-# StateLoom
+<p align="center">
+  <a href="https://stateloom.dev"><img src="assets/logo.svg" alt="StateLoom" height="48"></a>
+</p>
 
-[![PyPI](https://img.shields.io/pypi/v/stateloom.svg)](https://pypi.org/project/stateloom/)
-[![License](https://img.shields.io/badge/license-BSL%201.1-orange.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
-[![Website](https://img.shields.io/badge/website-stateloom.dev-6366f1)](https://stateloom.dev)
+<p align="center">
+  <a href="https://pypi.org/project/stateloom/"><img src="https://img.shields.io/pypi/v/stateloom.svg" alt="PyPI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL%201.1-orange.svg" alt="License"></a>
+  <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python"></a>
+  <a href="https://stateloom.dev"><img src="https://img.shields.io/badge/website-stateloom.dev-6366f1" alt="Website"></a>
+</p>
 
 **The stateful control plane for AI agents.** Track, secure, and optimize every agent run with absolute visibility and control — not just individual LLM calls.
 
-Works with multiple LLM SDKs (Anthropic, Gemini, OpenAI, Cohere, Mistral, LiteLLM, etc.) and agent CLIs like **Claude Code** and **Gemini CLI** — no code changes needed. Just `stateloom start` and point your CLI at it for cost tracking, PII scanning, budget enforcement, guardrails, and a full session timeline.
+Works with multiple LLM SDKs (Anthropic, Gemini, OpenAI, Cohere, Mistral, LiteLLM, etc.) and agent CLIs like Claude Code and Gemini CLI.
 
 ---
 
