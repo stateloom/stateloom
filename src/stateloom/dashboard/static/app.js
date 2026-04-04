@@ -2454,15 +2454,18 @@ function switchWaterfallMode(mode) {
 
 async function loadLocalStatus() {
     const [status, config] = await Promise.all([
-        fetchJSON('/local/status'),
+        fetchJSONSilent('/local/status'),
         fetchJSON('/config'),
     ]);
+    if (!status) return;
 
     const indicator = document.getElementById('local-ollama-status');
     if (status.available) {
         indicator.innerHTML = '<span class="status-online">Online</span>';
     } else {
-        indicator.innerHTML = '<span class="status-offline">Offline</span>';
+        indicator.innerHTML = '<span class="status-offline">Offline</span> '
+            + '<a href="https://ollama.com" target="_blank" style="color:var(--accent);font-size:0.85em">'
+            + 'Install</a>';
     }
 
     // Force-local and auto-route toggles
@@ -2476,7 +2479,7 @@ async function loadLocalStatus() {
 
     if (status.available) {
         try {
-            const modelsData = await fetchJSON('/local/models');
+            const modelsData = await fetchJSONSilent('/local/models');
             if (!modelsData) return;
             let matchedActive = '';
             (modelsData.models || []).forEach(m => {
@@ -2497,8 +2500,13 @@ async function loadLocalStatus() {
 async function loadDownloadedModels() {
     const tbody = document.getElementById('local-models-tbody');
     try {
-        const data = await fetchJSON('/local/models');
-        if (!data) return;
+        const data = await fetchJSONSilent('/local/models');
+        if (!data) {
+            tbody.innerHTML = '<tr><td colspan="4" class="empty-state">'
+                + 'Ollama not running. <a href="https://ollama.com" target="_blank" '
+                + 'style="color:var(--accent)">Install Ollama</a> to use local models.</td></tr>';
+            return;
+        }
         const models = data.models || [];
 
         if (models.length === 0) {
@@ -2540,7 +2548,9 @@ async function loadDownloadedModels() {
             if (currentVal) hotSwapSelect.value = currentVal;
         }
     } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Ollama unavailable</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">'
+            + 'Ollama not running. <a href="https://ollama.com" target="_blank" '
+            + 'style="color:var(--accent)">Install Ollama</a> to use local models.</td></tr>';
     }
 }
 
@@ -2670,7 +2680,7 @@ async function loadModelTesting() {
 
         // Populate model dropdown from downloaded local models
         try {
-            const localData = await fetchJSON('/local/models');
+            const localData = await fetchJSONSilent('/local/models');
             const select = document.getElementById('mt-model-select');
             if (select && localData) {
                 const currentVal = config?.shadow_model || '';

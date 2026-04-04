@@ -90,10 +90,12 @@ CREATE TABLE IF NOT EXISTS events (
     original_model TEXT,
     saved_cost REAL,
     cached_response_json TEXT,
+    request_messages_json TEXT,
     metadata TEXT,
     rating TEXT,
     score REAL,
     comment TEXT,
+    extra_json TEXT,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
@@ -420,6 +422,7 @@ class SQLiteStore:
                 "guardrail_detections",
                 "cost_by_model_json",
                 "tokens_by_model_json",
+                "request_messages_json",
             }
         )
         allowed_types = frozenset({"TEXT", "REAL", "INTEGER"})
