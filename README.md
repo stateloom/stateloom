@@ -148,7 +148,12 @@ export CODE_ASSIST_ENDPOINT=http://localhost:4782/code-assist
 gemini "refactor the auth module"
 ```
 
-Both CLIs connect to the same StateLoom instance. Subscription users (Claude Max, Gemini Ultra) work transparently — OAuth tokens pass through to the upstream provider.
+```bash
+export OPENAI_BASE_URL=http://localhost:4782/v1
+codex "add unit tests for the auth module"
+```
+
+All CLIs connect to the same StateLoom instance. Subscription users (Claude Max, Gemini Ultra, ChatGPT Pro) work transparently — OAuth tokens pass through to the upstream provider.
 
 ## For Teams & Enterprise
 

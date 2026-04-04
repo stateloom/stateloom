@@ -1,6 +1,18 @@
 {
   "_comment": "Prices in USD per token. Updated 2026-04. Tiers: if prompt_tokens > above_tokens, use that tier's rates (flat switch, last matching tier wins).",
   "models": {
+    "gpt-5.4": {
+      "input": 0.0000025,
+      "output": 0.000015
+    },
+    "gpt-5.4-mini": {
+      "input": 0.0000004,
+      "output": 0.0000016
+    },
+    "gpt-5.4-nano": {
+      "input": 0.0000002,
+      "output": 0.00000125
+    },
     "gpt-4o": {
       "input": 0.0000025,
       "output": 0.00001

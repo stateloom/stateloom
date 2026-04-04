@@ -77,6 +77,9 @@ class _WSRelayState:
     current_model: str = ""
     call_start: float = 0.0
     prompt_preview: str = ""
+    is_tool_continuation: bool = False
+    tool_names: list[str] = field(default_factory=list)
+    request_messages: list[dict[str, Any]] = field(default_factory=list)
     synthetic_ids: set[str] = field(default_factory=set)
 
 
@@ -186,7 +189,7 @@ async def _run_ws_middleware(
         # and WS close events.  response.completed with
         # status=incomplete matches OpenAI's content-filter pattern
         # and is treated as a terminal (non-retryable) turn.
-        logger.warning("WebSocket middleware blocked: %s", mw_err)
+        logger.warning("WebSocket middleware BLOCKED: %s", mw_err)
         syn_id = await _send_blocked_response(ws, str(mw_err))
         ws_state.synthetic_ids.add(syn_id)
         return True, None
@@ -346,8 +349,12 @@ def create_responses_router(
         import hashlib
 
         explicit_sid = ws.headers.get("x-stateloom-session-id", "")
+        # Codex CLI sends its own session ID in the `session_id` header
+        codex_sid = ws.headers.get("session_id", "")
         if explicit_sid:
             session_id = explicit_sid
+        elif codex_sid:
+            session_id = codex_sid
         else:
             forwarded = ws.headers.get("x-forwarded-for", "")
             client_ip = (
@@ -360,10 +367,9 @@ def create_responses_router(
             session_id = f"sticky-{fp}"
 
         logger.info(
-            "WebSocket proxy connecting to %s (token present: %s, headers: %s)",
+            "WebSocket proxy connecting to %s (session=%s)",
             upstream_ws_url,
-            bool(upstream_token),
-            list(upstream_headers.keys()),
+            session_id,
         )
 
         try:
@@ -423,6 +429,11 @@ def create_responses_router(
                                         instructions = resp_obj.get(
                                             "instructions", msg.get("instructions", "")
                                         )
+                                        # Detect tool continuations + extract tool names
+                                        _tc, _tnames = _detect_tool_continuation(input_field)
+                                        ws_state.is_tool_continuation = _tc
+                                        ws_state.tool_names = _tnames
+
                                         ws_state.prompt_preview = _extract_prompt_preview(
                                             input_field
                                         )
@@ -432,6 +443,10 @@ def create_responses_router(
                                         openai_msgs = _input_to_openai_messages(
                                             input_field, instructions
                                         )
+                                        # Snapshot content before middleware (PII modifies in-place)
+                                        original_content = [
+                                            m.get("content", "") for m in openai_msgs
+                                        ]
                                         should_skip, ctx = await _run_ws_middleware(
                                             ws,
                                             gate,
@@ -443,21 +458,52 @@ def create_responses_router(
                                         if should_skip:
                                             continue
 
-                                        # 4. Rebuild if middleware modified messages (PII redaction)
-                                        modified_msgs = ctx.request_kwargs.get("messages", [])
-                                        if modified_msgs != openai_msgs:
-                                            rebuilt_body = json.loads(
-                                                _rebuild_responses_body(resp_obj, modified_msgs)
+                                        # 4. Check if middleware modified messages (PII redaction)
+                                        current_content = [
+                                            m.get("content", "") for m in openai_msgs
+                                        ]
+                                        if current_content != original_content:
+                                            # Determine where input/instructions live:
+                                            # inside "response" key or at top level
+                                            has_response_key = "response" in msg
+                                            body_to_rebuild = resp_obj if has_response_key else msg
+                                            rebuilt = json.loads(
+                                                _rebuild_responses_body(
+                                                    body_to_rebuild, openai_msgs
+                                                )
                                             )
-                                            new_msg = dict(msg)
-                                            new_msg["response"] = rebuilt_body
+                                            new_msg = json.loads(data)
+                                            if has_response_key:
+                                                new_msg["response"] = rebuilt
+                                            else:
+                                                # Merge rebuilt fields into top level
+                                                for k in ("input", "instructions"):
+                                                    if k in rebuilt:
+                                                        new_msg[k] = rebuilt[k]
                                             forward_data = json.dumps(new_msg)
+                                            # Update prompt_preview with redacted text
+                                            ws_state.prompt_preview = (
+                                                _extract_prompt_preview_from_msgs(openai_msgs)
+                                                or ws_state.prompt_preview
+                                            )
 
-                                        logger.info(
-                                            "WebSocket response.create: model=%s billing=%s",
-                                            ws_state.current_model,
-                                            billing_mode,
-                                        )
+                                        # 5. Store request messages for dashboard inspection
+                                        if not ws_state.is_tool_continuation:
+                                            ws_state.request_messages = list(openai_msgs)
+
+                                        # 6. Persist middleware events (PII, guardrails)
+                                        if ctx is not None and ctx.events:
+                                            for evt in ctx.events:
+                                                evt.session_id = session.id
+                                                evt.step = session.step_counter
+                                            try:
+                                                for evt in ctx.events:
+                                                    gate.store.save_event(evt)
+                                            except Exception:
+                                                logger.warning(
+                                                    "Failed to persist middleware events",
+                                                    exc_info=True,
+                                                )
                                 except (json.JSONDecodeError, Exception) as parse_err:
                                     if isinstance(parse_err, StateLoomError):
                                         raise  # already handled above
@@ -761,53 +807,139 @@ async def _send_blocked_response(
     import uuid
 
     resp_id = f"{_SYNTHETIC_RESP_PREFIX}{uuid.uuid4().hex[:24]}"
+    msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+    content_idx = 0
+    output_idx = 0
     created_at = int(time.time())
+    block_text = f"[StateLoom] {error_message}"
 
     # 1. response.created — marks the turn as started
-    created_event = {
-        "type": "response.created",
-        "response": {
-            "id": resp_id,
-            "object": "response",
-            "status": "in_progress",
-            "created_at": created_at,
-            "error": None,
-            "output": [],
-        },
-    }
-    await ws.send_text(json.dumps(created_event))
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "response.created",
+                "response": {
+                    "id": resp_id,
+                    "object": "response",
+                    "status": "in_progress",
+                    "created_at": created_at,
+                    "error": None,
+                    "output": [],
+                },
+            }
+        )
+    )
 
-    # 2. response.completed with status=incomplete — terminates the turn
-    completed_event = {
-        "type": "response.completed",
-        "response": {
-            "id": resp_id,
-            "object": "response",
-            "status": "incomplete",
-            "created_at": created_at,
-            "incomplete_details": {"reason": "content_filter"},
-            "output": [
-                {
+    # 2. Stream the error text via delta events so Codex CLI renders it
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "response.output_item.added",
+                "output_index": output_idx,
+                "item": {
                     "type": "message",
-                    "id": f"msg_{uuid.uuid4().hex[:24]}",
+                    "id": msg_id,
+                    "role": "assistant",
+                    "status": "in_progress",
+                    "content": [],
+                },
+            }
+        )
+    )
+
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "response.content_part.added",
+                "item_id": msg_id,
+                "output_index": output_idx,
+                "content_index": content_idx,
+                "part": {"type": "output_text", "text": ""},
+            }
+        )
+    )
+
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "response.output_text.delta",
+                "item_id": msg_id,
+                "output_index": output_idx,
+                "content_index": content_idx,
+                "delta": block_text,
+            }
+        )
+    )
+
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "response.output_text.done",
+                "item_id": msg_id,
+                "output_index": output_idx,
+                "content_index": content_idx,
+                "text": block_text,
+            }
+        )
+    )
+
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "response.content_part.done",
+                "item_id": msg_id,
+                "output_index": output_idx,
+                "content_index": content_idx,
+                "part": {"type": "output_text", "text": block_text},
+            }
+        )
+    )
+
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "response.output_item.done",
+                "output_index": output_idx,
+                "item": {
+                    "type": "message",
+                    "id": msg_id,
                     "role": "assistant",
                     "status": "completed",
-                    "content": [
+                    "content": [{"type": "output_text", "text": block_text}],
+                },
+            }
+        )
+    )
+
+    # 3. response.completed with status=incomplete — terminates the turn
+    await ws.send_text(
+        json.dumps(
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": resp_id,
+                    "object": "response",
+                    "status": "incomplete",
+                    "created_at": created_at,
+                    "incomplete_details": {"reason": "content_filter"},
+                    "output": [
                         {
-                            "type": "output_text",
-                            "text": f"[StateLoom] {error_message}",
+                            "type": "message",
+                            "id": msg_id,
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [{"type": "output_text", "text": block_text}],
                         }
                     ],
-                }
-            ],
-            "usage": {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "total_tokens": 0,
-            },
-        },
-    }
-    await ws.send_text(json.dumps(completed_event))
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                },
+            }
+        )
+    )
     return resp_id
 
 
@@ -849,7 +981,61 @@ def _extract_prompt_preview(input_field: Any) -> str:
                 if parts:
                     text = " ".join(parts)
                     break
+        # If no user message found, check if this is a tool continuation
+        if not text and any(
+            isinstance(item, dict) and item.get("type") == "function_call_output"
+            for item in input_field
+        ):
+            text = "[tool continuation]"
     return text[:200]
+
+
+def _detect_tool_continuation(
+    input_field: Any,
+) -> tuple[bool, list[str]]:
+    """Detect if input is a tool continuation and extract tool names.
+
+    Returns (is_tool_continuation, tool_names).
+    """
+    if not isinstance(input_field, list):
+        return False, []
+
+    has_tool_output = False
+    has_user_message = False
+    tool_names: list[str] = []
+
+    for item in input_field:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type", "")
+        if item_type == "function_call_output":
+            has_tool_output = True
+            call_id = item.get("call_id", "")
+            # Extract tool name from call_id if available (format: call_xxx)
+            tool_names.append(call_id)
+        elif item_type == "message" and item.get("role") == "user":
+            has_user_message = True
+
+    # Tool continuation: has tool outputs and no new user message
+    if has_tool_output and not has_user_message:
+        return True, tool_names
+
+    return False, []
+
+
+def _extract_prompt_preview_from_msgs(
+    messages: list[dict[str, Any]],
+) -> str:
+    """Extract prompt preview from OpenAI-format messages (post-middleware).
+
+    Used to update prompt_preview after PII redaction.
+    """
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, str) and content:
+                return content[:200]
+    return ""
 
 
 def _record_ws_event(
@@ -873,6 +1059,7 @@ def _record_ws_event(
     try:
         data = json.loads(message)
         msg_type = data.get("type", "")
+
         if msg_type != "response.completed":
             return
 
@@ -896,6 +1083,14 @@ def _record_ws_event(
             ws_state.call_start = 0.0
 
         preview = ws_state.prompt_preview
+        is_tool_cont = ws_state.is_tool_continuation
+
+        # For tool continuations, show tool names in preview
+        if is_tool_cont and ws_state.tool_names:
+            tool_label = ", ".join(ws_state.tool_names[:5])
+            if len(ws_state.tool_names) > 5:
+                tool_label += f" +{len(ws_state.tool_names) - 5} more"
+            preview = tool_label
 
         event = LLMCallEvent(
             session_id=session.id,
@@ -910,7 +1105,17 @@ def _record_ws_event(
             latency_ms=latency_ms,
             is_streaming=True,
             prompt_preview=preview,
+            is_tool_continuation=is_tool_cont,
         )
+
+        # Store request messages for lazy-load inspection (skip tool continuations)
+        if gate.config.store_payloads and ws_state.request_messages and not is_tool_cont:
+            try:
+                event.request_messages_json = json.dumps(
+                    ws_state.request_messages, default=str, ensure_ascii=False
+                )
+            except Exception:
+                logger.warning("Request messages serialization failed", exc_info=True)
 
         # Update session accumulators
         session.add_cost(
@@ -1293,6 +1498,13 @@ def _input_to_openai_messages(
         for item in input_field:
             if not isinstance(item, dict):
                 logger.debug("_input_to_openai_messages: skipping non-dict item: %s", type(item))
+                continue
+            # Handle function_call_output items (tool continuations) —
+            # convert to tool role so middleware can scan tool output content
+            if item.get("type") == "function_call_output":
+                output = item.get("output", "")
+                if isinstance(output, str) and output:
+                    messages.append({"role": "tool", "content": output})
                 continue
             # Only process message-type items for middleware
             if item.get("type") != "message":
