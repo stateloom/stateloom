@@ -29,6 +29,7 @@ def install(ver: str) -> None:
 
     click.echo(f"Installing Ollama ({ver})...")
 
+    bar: Any
     with click.progressbar(length=100, label="Downloading") as bar:
         last_pct: list[int] = [0]
 

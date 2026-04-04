@@ -58,7 +58,7 @@ litellm = ["litellm>=1.40"]
 genai = ["google-genai>=1.0"]
 all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]", "stateloom[auth]", "stateloom[genai]"]
 typecheck = [
-    "mypy>=1.19,<2.0",
+    "mypy==1.19.1",
     "openai>=1.0",
     "anthropic>=0.39",
     "google-generativeai>=0.4",
@@ -74,7 +74,7 @@ dev = [
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.0",
     "ruff>=0.14,<1.0",
-    "mypy>=1.19,<2.0",
+    "mypy==1.19.1",
     "respx>=0.20",
     "openai>=1.0",
     "anthropic>=0.39",

@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-BSL%201.1-orange.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
 
-**The stateful control plane for AI agents.** Track, secure, optimize and get control and visibility into every agent run — not just individual LLM calls.
+**The stateful control plane for AI agents.** Track, secure, and optimize every agent run with absolute visibility and control — not just individual LLM calls.
 
 ---
 
@@ -13,7 +13,7 @@ Standard AI gateways operate at the **LLM call level** — they see each API req
 
 StateLoom is **session-aware** and built explicitly for agents. We group fragmented workflows into meaningful, stateful sessions. This allows you to resume crashed scripts without paying to repeat previously successful steps, enforce strict budgets across entire workflows, contain the blast radius of rogue agents, and gain absolute transparency into what your models are doing behind the scenes.
 
-Most importantly, StateLoom is designed for absolute data sovereignty. Because it runs locally on your laptop or directly inside your enterprise network (VPC), it functions as an isolated, zero-trust control plane ensuring your data never pass through a third-party SaaS proxy.
+Most importantly, StateLoom is designed for absolute data sovereignty. Because it runs locally on your laptop or directly inside your enterprise network (VPC), it functions as an isolated, zero-trust control plane ensuring your data never passes through a third-party SaaS proxy.
 
 ---
 
@@ -27,6 +27,7 @@ Most importantly, StateLoom is designed for absolute data sovereignty. Because i
 - [For Teams & Enterprise](#for-teams--enterprise)
 - [Key Examples](#key-examples)
 - [Dashboard](#dashboard)
+- [Extras](#extras)
 - [Configuration](#configuration)
 - [Error Handling](#error-handling)
 - [Documentation](#documentation)
@@ -43,8 +44,6 @@ pip install stateloom
 
 **Requirements:** Python 3.10+ (tested on 3.10, 3.11, 3.12, 3.13). See [extras](#extras) for optional dependencies.
 
-![StateLoom Dashboard](assets/homescreen.png)
-
 ## Quick Start
 
 ```bash
@@ -52,8 +51,19 @@ pip install stateloom
 stateloom start
 # Dashboard is live at http://localhost:4782
 ```
+Or use it in your code, wrap your regular calls within stateloom session or use
+stateloom.chat(model="gemini-2.5-flash", messages=[...]) directly.
+```python
+stateloom.init()
+claude = anthropic.Anthropic()
 
-Then point any LLM CLI or SDK at it — see [Agent CLI Integration](#agent-cli-integration) or the [multi-provider SDK example](#multi-provider-session) below.
+with stateloom.session("customer-report", budget=2.0, durable=True) as s:
+    research = claude.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": "Key trends in AI governance 2025"}],
+    )
+```
 
 ## Providers
 
@@ -116,7 +126,7 @@ StateLoom gives solo developers and startups everything needed to build resilien
 You already pay for Claude Pro or Gemini Ultra. Use your existing subscription through StateLoom — get cost tracking, PII scanning, budget enforcement, guardrails, and a session timeline for every agent run. No API key needed, no code changes.
 
 ```bash
-stateloom serve
+stateloom start
 ```
 
 ```bash
@@ -132,10 +142,6 @@ gemini "refactor the auth module"
 
 Both CLIs connect to the same StateLoom instance. Subscription users (Claude Max, Gemini Ultra) work transparently — OAuth tokens pass through to the upstream provider.
 
-[![Claude CLI through StateLoom](https://img.youtube.com/vi/ZGct2D3Bwb4/maxresdefault.jpg)](https://www.youtube.com/watch?v=ZGct2D3Bwb4)
-
-![Gemini CLI session in StateLoom dashboard](assets/gemini_cli.png)
-
 ## For Teams & Enterprise
 
 **StateLoom Enterprise Edition (EE)** provides a single, centralized control plane to govern, secure, and optimize your entire AI workforce. We give engineering and finance teams absolute visibility into **hierarchical org and team-level token billing**, paired with centralized **Virtual Key management** and strict **budget enforcements** to automate chargebacks and prevent runaway costs. Accelerate your AI roadmap by empowering teams to **spin up agents in secure, isolated sandboxes** within your own private ecosystem, safely run live **A/B experiments**, validate cheaper models via risk-free **dark launching**, orchestrate high-assurance **multi-agent consensus**, and auto-generate proprietary training datasets through our **distillation flywheel**. Simultaneously, we provide your CISO with a unified zero-trust security perimeter: an in-memory **Secret Vault**, real-time **prompt guardrails**, declarative **compliance profiles**, dynamic **force re-routing**, and a **global kill switch** to instantly contain the blast radius of rogue agents. There is so much more you get. And the idea behind all of it is for you to keep the full control of the agents while allowing you to scale seamlessly.
@@ -144,6 +150,13 @@ Both CLIs connect to the same StateLoom instance. Subscription users (Claude Max
 
 
 ## Key Examples
+
+![StateLoom Dashboard](assets/homescreen.png)
+
+[![Claude CLI through StateLoom](https://img.youtube.com/vi/ZGct2D3Bwb4/maxresdefault.jpg)](https://www.youtube.com/watch?v=ZGct2D3Bwb4)
+
+![Gemini CLI session in StateLoom dashboard](assets/gemini_cli.png)
+
 
 ### Multi-Provider Session
 
@@ -199,8 +212,6 @@ stateloom.init(
 ```
 
 ![PII blocked — SSN detected in Claude CLI tool-use flow](assets/ssn_block.png)
-
-![PII blocked in OpenClaw chat UI](assets/openclaw_pii_block.png)
 
 ### Guardrails
 
@@ -342,6 +353,19 @@ Starts automatically at `localhost:4782`. Live session viewer, REST API, and Web
 
 See [full API endpoint reference](docs/reference.md#dashboard) for all REST endpoints.
 
+## Extras
+
+```bash
+pip install stateloom[langchain]    # LangChain callback handler
+pip install stateloom[ner]          # GLiNER NER-based PII detection
+pip install stateloom[semantic]     # Semantic caching (FAISS + sentence-transformers)
+pip install stateloom[prompts]      # File-based prompt versioning (watchdog)
+pip install stateloom[auth]         # OAuth2/OIDC authentication (pyjwt + argon2-cffi)
+pip install stateloom[redis]        # Redis cache/queue backend
+pip install stateloom[metrics]      # Prometheus metrics
+pip install stateloom[tracing]      # OpenTelemetry distributed tracing
+pip install stateloom[all]          # Everything
+```
 
 ## Configuration
 
