@@ -391,7 +391,7 @@ class TestResponsesMessageConversion:
         assert messages[1] == {"role": "user", "content": "Hello"}
 
     def test_mixed_input_types(self):
-        """Non-message items in array input are ignored."""
+        """Non-message items in array input: item_reference skipped, function_call_output converted."""
         input_field = [
             {"type": "message", "role": "user", "content": "Hello"},
             {"type": "item_reference", "id": "ref_123"},
@@ -399,9 +399,10 @@ class TestResponsesMessageConversion:
             {"type": "message", "role": "user", "content": "What's next?"},
         ]
         messages = _input_to_openai_messages(input_field)
-        assert len(messages) == 2
+        assert len(messages) == 3
         assert messages[0]["content"] == "Hello"
-        assert messages[1]["content"] == "What's next?"
+        assert messages[1] == {"role": "tool", "content": "42"}
+        assert messages[2]["content"] == "What's next?"
 
     def test_content_array_with_parts(self):
         """Content as array of input_text parts."""
@@ -1006,7 +1007,10 @@ class TestSendBlockedResponse:
 
         resp_id = await _send_blocked_response(ws, "PII blocked: ssn detected")
 
-        assert len(sent) == 2
+        # 8 events: created, output_item.added, content_part.added,
+        # output_text.delta, output_text.done, content_part.done,
+        # output_item.done, response.completed
+        assert len(sent) == 8
         assert resp_id.startswith("resp_ag_")
 
         created = json.loads(sent[0])
@@ -1014,7 +1018,11 @@ class TestSendBlockedResponse:
         assert created["response"]["status"] == "in_progress"
         assert created["response"]["id"] == resp_id
 
-        completed = json.loads(sent[1])
+        delta = json.loads(sent[3])
+        assert delta["type"] == "response.output_text.delta"
+        assert "PII blocked" in delta["delta"]
+
+        completed = json.loads(sent[7])
         assert completed["type"] == "response.completed"
         assert completed["response"]["status"] == "incomplete"
         assert completed["response"]["id"] == resp_id
