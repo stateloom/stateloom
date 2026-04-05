@@ -1237,6 +1237,8 @@ class Gate:
                 session.guardrail_detections = existing.guardrail_detections
                 session.step_counter = existing.step_counter
                 session.estimated_api_cost = existing.estimated_api_cost
+                session.cost_by_model = dict(existing.cost_by_model)
+                session.tokens_by_model = {k: dict(v) for k, v in existing.tokens_by_model.items()}
                 # Metadata merge order: stored values first, then current-request
                 # overrides layered on top.  This preserves middleware state
                 # (e.g. _pii_scanned_msg_count) across HTTP requests while
@@ -1244,6 +1246,11 @@ class Gate:
                 stored_meta = dict(existing.metadata)
                 stored_meta.update(session.metadata)
                 session.metadata = stored_meta
+
+                # Resume budget from store if caller didn't pass an explicit one.
+                # This lets dashboard-set budgets take effect on the next request.
+                if budget is None and existing.budget is not None:
+                    session.budget = existing.budget
 
         # Durable resumption: activate replay engine if resuming with cached steps
         _durable_engine = None
@@ -1379,11 +1386,17 @@ class Gate:
                 session.guardrail_detections = existing.guardrail_detections
                 session.step_counter = existing.step_counter
                 session.estimated_api_cost = existing.estimated_api_cost
+                session.cost_by_model = dict(existing.cost_by_model)
+                session.tokens_by_model = {k: dict(v) for k, v in existing.tokens_by_model.items()}
                 # Metadata merge: stored first, current overlays on top
                 # (see sync session() for detailed merge-order rationale).
                 stored_meta = dict(existing.metadata)
                 stored_meta.update(session.metadata)
                 session.metadata = stored_meta
+
+                # Resume budget from store — see sync session() for rationale.
+                if budget is None and existing.budget is not None:
+                    session.budget = existing.budget
 
         # Durable resumption — see sync session() for step_counter reset rationale.
         _durable_engine = None

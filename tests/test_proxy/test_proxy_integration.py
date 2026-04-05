@@ -875,27 +875,12 @@ class TestProxyMultiFeature:
 
 
 # ---------------------------------------------------------------------------
-# Agent proxy endpoint (uses Client legacy path — always)
+# Agent proxy endpoint (uses provider SDK handler)
 # ---------------------------------------------------------------------------
 
 
 class TestProxyAgents:
-    """Agent endpoint through proxy (always uses Client, never passthrough)."""
-
-    def _patch_client(self, content="Agent response"):
-        """Mock Client for agent endpoint (legacy path)."""
-        mock_resp = _mock_chat_response(content)
-        p = patch("stateloom.proxy.router.Client")
-
-        def setup(mock_cls):
-            instance = MagicMock()
-            mock_cls.return_value = instance
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=None)
-            instance.achat = AsyncMock(return_value=mock_resp)
-            return instance
-
-        return p, setup
+    """Agent endpoint through proxy (always uses provider SDK handler)."""
 
     def test_agent_endpoint_basic(self, e2e_gate):
         """POST /v1/agents/{slug}/chat/completions → agent applied."""
@@ -912,9 +897,18 @@ class TestProxyAgents:
             system_prompt="You are a helpful proxy agent.",
         )
 
-        patcher, setup = self._patch_client()
-        with patcher as mock_cls:
-            setup(mock_cls)
+        mock_response = make_openai_response("Agent response")
+
+        async def _mock_llm(ctx, llm_call):
+            ctx.response = mock_response
+            ctx.latency_ms = 1.0
+            return mock_response
+
+        with patch(
+            "stateloom.middleware.pipeline.Pipeline._execute_llm_call",
+            new_callable=AsyncMock,
+            side_effect=_mock_llm,
+        ):
             resp = client.post(
                 "/v1/agents/proxy-agent/chat/completions",
                 json={"messages": [{"role": "user", "content": "Hi agent"}]},
@@ -961,9 +955,18 @@ class TestProxyAgents:
 
         key, _ = _create_vk(gate, team.id, org_id=org.id, agent_ids=[agent1.id])
 
-        patcher, setup = self._patch_client()
-        with patcher as mock_cls:
-            setup(mock_cls)
+        mock_response = make_openai_response("Allowed response")
+
+        async def _mock_llm(ctx, llm_call):
+            ctx.response = mock_response
+            ctx.latency_ms = 1.0
+            return mock_response
+
+        with patch(
+            "stateloom.middleware.pipeline.Pipeline._execute_llm_call",
+            new_callable=AsyncMock,
+            side_effect=_mock_llm,
+        ):
             resp1 = client.post(
                 "/v1/agents/allowed-agent/chat/completions",
                 json={"messages": [{"role": "user", "content": "Hi"}]},

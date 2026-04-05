@@ -41,6 +41,16 @@ def auto_patch(gate: Gate) -> list[dict[str, Any]]:
     except Exception:
         pass  # google-genai not installed or patch failed
 
+    # Promote GeminiGenaiAdapter in the registry for Client/proxy paths.
+    # SDK interceptors already captured their adapter in closures above,
+    # so this only affects get_adapter("gemini") callers (Client._prepare_call,
+    # response_format, etc.) — giving them full tool/function-calling support
+    # via the new google-genai SDK.
+    from stateloom.intercept.adapters.gemini_genai_adapter import GeminiGenaiAdapter
+    from stateloom.intercept.provider_registry import register_adapter
+
+    register_adapter(GeminiGenaiAdapter())
+
     # LiteLLM uses module-level functions — patch separately
     try:
         from stateloom.intercept.adapters.litellm_adapter import patch_litellm

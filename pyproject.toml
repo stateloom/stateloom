@@ -35,6 +35,7 @@ dependencies = [
     "httpx>=0.25",
     "pyyaml>=6.0",
     "click>=8.0",
+    "google-genai>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -55,8 +56,7 @@ migrations = ["alembic>=1.13", "sqlalchemy>=2.0"]
 mistral = ["mistralai>=1.0"]
 cohere = ["cohere>=5.0"]
 litellm = ["litellm>=1.40"]
-genai = ["google-genai>=1.0"]
-all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]", "stateloom[auth]", "stateloom[genai]"]
+all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]", "stateloom[auth]"]
 typecheck = [
     "mypy==1.19.1",
     "openai>=1.0",

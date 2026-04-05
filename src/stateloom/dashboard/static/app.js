@@ -436,19 +436,29 @@ async function loadSessionDetail(sessionId) {
     // Hide budget bars for subscription sessions (cost tracking is incomplete)
     const budgetCard = document.getElementById('detail-budget-card');
     const hasBudget = !isSub && (session.budget || session.org_id || session.team_id);
-    if (hasBudget) {
-        // Session budget
+    // Always show budget card for non-subscription sessions so admins can set a budget
+    if (!isSub) {
+        // Session budget — editable
+        const sessionRow = document.getElementById('detail-budget-session-row');
+        const budgetTextEl = document.getElementById('detail-budget-text');
+        const bar = document.getElementById('detail-budget-progress');
         if (session.budget) {
             const rawPct = (session.total_cost / session.budget) * 100;
             const pct = Math.min(rawPct, 100);
-            document.getElementById('detail-budget-text').textContent =
-                `$${session.total_cost.toFixed(4)} / $${session.budget.toFixed(4)}`;
-            const bar = document.getElementById('detail-budget-progress');
+            budgetTextEl.innerHTML =
+                `$${session.total_cost.toFixed(4)} / $${session.budget.toFixed(4)} ` +
+                `<a href="#" class="budget-edit-link" onclick="openBudgetEdit('${escapeHtml(sessionId)}', ${session.budget}); return false;" style="font-size:11px; margin-left:6px;">edit</a>` +
+                ` <a href="#" class="budget-edit-link" onclick="removeBudget('${escapeHtml(sessionId)}'); return false;" style="font-size:11px; margin-left:4px; color:#e74c3c;">remove</a>`;
             bar.style.width = pct + '%';
             bar.className = rawPct > 90 ? 'budget-progress budget-danger' : 'budget-progress';
-            document.getElementById('detail-budget-session-row').style.display = 'block';
+            sessionRow.style.display = 'block';
         } else {
-            document.getElementById('detail-budget-session-row').style.display = 'none';
+            budgetTextEl.innerHTML =
+                `<span style="color:#888;">Not set</span> ` +
+                `<a href="#" class="budget-edit-link" onclick="openBudgetEdit('${escapeHtml(sessionId)}', null); return false;" style="font-size:11px; margin-left:6px;">Set budget</a>`;
+            bar.style.width = '0%';
+            bar.className = 'budget-progress';
+            sessionRow.style.display = 'block';
         }
         // Team budget (reuse _teamData fetched above)
         const teamBudgetRow = document.getElementById('detail-budget-team-row');
@@ -484,6 +494,8 @@ async function loadSessionDetail(sessionId) {
     } else {
         budgetCard.style.display = 'none';
     }
+
+    renderSessionCostByModel(session.cost_by_model, session.tokens_by_model, billingMode);
 
     // Replay source detection (replay sessions have IDs like "replay-<original-id>")
     const replaySourceEl = document.getElementById('detail-replay-source');
@@ -953,6 +965,48 @@ function renderCostByModel(data) {
     container.innerHTML = html;
 }
 
+function renderSessionCostByModel(costByModel, tokensByModel, billingMode) {
+    const container = document.getElementById('detail-cost-by-model');
+    if (!container) return;
+    const costs = costByModel || {};
+    const tokens = tokensByModel || {};
+    const models = [...new Set([...Object.keys(costs), ...Object.keys(tokens)])];
+    if (models.length === 0) { container.style.display = 'none'; return; }
+
+    const isSub = billingMode === 'subscription';
+    const totalCost = Object.values(costs).reduce((a, b) => a + b, 0);
+    if (!isSub && totalCost <= 0) {
+        container.style.display = 'none';
+        return;
+    }
+
+    let html = '<div class="stat-card" style="margin-bottom:0;"><div class="stat-label">Cost by Model</div>';
+    html += '<div style="width:100%; padding:8px 0;">';
+    models.sort((a, b) => (costs[b] || 0) - (costs[a] || 0));
+    models.forEach(model => {
+        const cost = costs[model] || 0;
+        const tokData = tokens[model] || {};
+        const totalTok = tokData.total_tokens || 0;
+        const pct = totalCost > 0 ? (cost / totalCost * 100).toFixed(1) : 0;
+        const costStr = isSub ? '' : `$${cost.toFixed(4)} (${pct}%)`;
+        const tokStr = totalTok > 0 ? `${totalTok.toLocaleString()} tok` : '';
+        const detail = [costStr, tokStr].filter(Boolean).join(' · ');
+        html += `
+            <div style="margin-bottom:8px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span style="color:var(--text-primary);">${escapeHtml(model)}</span>
+                    <span style="color:var(--accent-cyan); font-family:var(--font-mono);">${detail}</span>
+                </div>
+                <div style="background:var(--bg-tertiary); border-radius:4px; height:8px;">
+                    <div style="background:var(--accent-cyan); border-radius:4px; height:8px; width:${pct}%;"></div>
+                </div>
+            </div>`;
+    });
+    html += '</div></div>';
+    container.innerHTML = html;
+    container.style.display = 'block';
+}
+
 async function loadPII() {
     const offset = _piiPage * _piiPageSize;
     const data = await fetchJSON(`/pii?limit=${_piiPageSize}&offset=${offset}`);
@@ -1073,6 +1127,55 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// --- Session Budget Edit ---
+function openBudgetEdit(sessionId, currentBudget) {
+    const textEl = document.getElementById('detail-budget-text');
+    const val = currentBudget != null ? currentBudget : '';
+    textEl.innerHTML =
+        `<input type="text" inputmode="decimal" id="budget-edit-input" value="${val}" ` +
+        `placeholder="0.00" class="settings-input" style="width:90px; -webkit-text-fill-color:var(--text-primary); background:var(--bg-tertiary);"> ` +
+        `<button onclick="saveBudget('${escapeHtml(sessionId)}')" class="btn btn-sm btn-primary" style="-webkit-text-fill-color:var(--accent-cyan);">Save</button> ` +
+        `<button onclick="loadSessionDetail('${escapeHtml(sessionId)}')" class="btn btn-sm" style="-webkit-text-fill-color:var(--text-primary);">Cancel</button>`;
+    const inp = document.getElementById('budget-edit-input');
+    if (inp) inp.focus();
+}
+
+async function saveBudget(sessionId) {
+    const inp = document.getElementById('budget-edit-input');
+    if (!inp) return;
+    const raw = inp.value.trim();
+    if (raw === '') {
+        showToast('Enter a budget value', 'error');
+        return;
+    }
+    const val = parseFloat(raw);
+    if (isNaN(val) || val < 0) {
+        showToast('Budget must be a non-negative number', 'error');
+        return;
+    }
+    const res = await fetchJSON(`/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({budget: val}),
+    });
+    if (res) {
+        showToast('Budget updated', 'success');
+        loadSessionDetail(sessionId);
+    }
+}
+
+async function removeBudget(sessionId) {
+    const res = await fetchJSON(`/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({budget: null}),
+    });
+    if (res) {
+        showToast('Budget removed', 'success');
+        loadSessionDetail(sessionId);
+    }
 }
 
 // --- PII Rules CRUD ---
@@ -1774,7 +1877,10 @@ function getWaterfallStatus(event) {
 
 function getSubRowContext(event) {
     const type = event.event_type;
-    if (type === 'pii_detection') return event.pii_type || '';
+    if (type === 'pii_detection') {
+        const label = event.pii_type || '';
+        return event._pii_count > 1 ? `${label} \u00d7${event._pii_count}` : label;
+    }
     if (type === 'shadow_draft') return event.local_model || '';
     if (type === 'semantic_retry') return `attempt ${event.attempt || '?'}/${event.max_attempts || '?'}`;
     if (type === 'blast_radius') return event.trigger || '';
@@ -2149,6 +2255,26 @@ function _addToolLoadMoreRow(tbody, toolRowId, sessionId, parentStep, maxLatency
     }
 }
 
+function _groupPiiSubEvents(subEvents) {
+    const grouped = [];
+    const piiMap = new Map();
+    for (const ev of subEvents) {
+        if (ev.event_type === 'pii_detection') {
+            const key = (ev.pii_type || '') + '|' + (ev.action_taken || '');
+            if (piiMap.has(key)) {
+                piiMap.get(key)._pii_count += 1;
+            } else {
+                const copy = Object.assign({}, ev, { _pii_count: 1 });
+                piiMap.set(key, copy);
+                grouped.push(copy);
+            }
+        } else {
+            grouped.push(ev);
+        }
+    }
+    return grouped;
+}
+
 function renderWaterfallTimeline(events, session) {
     const tbody = document.getElementById('waterfall-tbody');
     if (!tbody) return;
@@ -2293,8 +2419,9 @@ function renderWaterfallTimeline(events, session) {
             tbody.appendChild(detailRow);
 
             // Sub-event rows
-            step.subEvents.forEach((sub, idx) => {
-                const isLast = idx === step.subEvents.length - 1 && !step.tool_summary;
+            const groupedSubs = _groupPiiSubEvents(step.subEvents);
+            groupedSubs.forEach((sub, idx) => {
+                const isLast = idx === groupedSubs.length - 1 && !step.tool_summary;
                 const connector = isLast ? '\u2514\u2500' : '\u251C\u2500';
                 const subRowId = `${rowId}-sub-${idx}`;
                 const subBarClass = getDurationBarClass(sub);

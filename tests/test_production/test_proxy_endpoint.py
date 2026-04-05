@@ -5,7 +5,6 @@ Virtual key auth, model routing, error format through the proxy endpoint.
 
 from __future__ import annotations
 
-import types
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -61,16 +60,16 @@ def test_proxy_basic_request(e2e_gate):
 
     mock_response = make_openai_response("Proxy response")
 
-    with patch("stateloom.chat.Client.achat", new_callable=AsyncMock) as mock_chat:
-        mock_chat.return_value = types.SimpleNamespace(
-            raw=mock_response,
-            content="Proxy response",
-            model="gpt-3.5-turbo",
-            cost=0.001,
-            tokens=15,
-            provider="openai",
-        )
+    async def _mock_llm(ctx, llm_call):
+        ctx.response = mock_response
+        ctx.latency_ms = 1.0
+        return mock_response
 
+    with patch(
+        "stateloom.middleware.pipeline.Pipeline._execute_llm_call",
+        new_callable=AsyncMock,
+        side_effect=_mock_llm,
+    ):
         resp = client.post(
             "/v1/chat/completions",
             json={"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": "Hi"}]},
@@ -162,16 +161,16 @@ def test_proxy_virtual_key_budget(e2e_gate):
 
     mock_response = make_openai_response("Budget response")
 
-    with patch("stateloom.chat.Client.achat", new_callable=AsyncMock) as mock_chat:
-        mock_chat.return_value = types.SimpleNamespace(
-            raw=mock_response,
-            content="Budget response",
-            model="gpt-3.5-turbo",
-            cost=0.001,
-            tokens=15,
-            provider="openai",
-        )
+    async def _mock_llm(ctx, llm_call):
+        ctx.response = mock_response
+        ctx.latency_ms = 1.0
+        return mock_response
 
+    with patch(
+        "stateloom.middleware.pipeline.Pipeline._execute_llm_call",
+        new_callable=AsyncMock,
+        side_effect=_mock_llm,
+    ):
         resp = client.post(
             "/v1/chat/completions",
             json={"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": "Hi"}]},

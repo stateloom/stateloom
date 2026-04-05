@@ -494,6 +494,27 @@ def create_api_router(gate: Gate) -> APIRouter:
             )
             result["call_count_with_children"] = session.call_count + child_calls
 
+            # Merge per-model breakdowns from children
+            merged_cost_by_model: dict[str, float] = dict(session.cost_by_model)
+            merged_tokens_by_model: dict[str, dict[str, int]] = {
+                k: dict(v) for k, v in session.tokens_by_model.items()
+            }
+            for child in children:
+                for model, cost in child.cost_by_model.items():
+                    merged_cost_by_model[model] = merged_cost_by_model.get(model, 0.0) + cost
+                for model, toks in child.tokens_by_model.items():
+                    existing = merged_tokens_by_model.get(
+                        model, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                    )
+                    merged_tokens_by_model[model] = {
+                        "prompt_tokens": existing["prompt_tokens"] + toks.get("prompt_tokens", 0),
+                        "completion_tokens": existing["completion_tokens"]
+                        + toks.get("completion_tokens", 0),
+                        "total_tokens": existing["total_tokens"] + toks.get("total_tokens", 0),
+                    }
+            result["cost_by_model"] = {k: round(v, 6) for k, v in merged_cost_by_model.items()}
+            result["tokens_by_model"] = merged_tokens_by_model
+
         return result
 
     @router.get("/sessions/{session_id}/events")
@@ -682,6 +703,29 @@ def create_api_router(gate: Gate) -> APIRouter:
                 detail=f"Session is not suspended (status: {session.status.value})",
             )
         return {"status": "resumed", "session_id": session_id}
+
+    @router.patch("/sessions/{session_id}")
+    async def update_session(session_id: str, request: Request) -> dict[str, Any]:
+        session = gate.store.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        body = await request.json()
+        if "budget" in body:
+            val = body["budget"]
+            if val is not None:
+                try:
+                    val = float(val)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=422, detail="budget must be a number or null")
+                if val < 0:
+                    raise HTTPException(status_code=422, detail="budget must be non-negative")
+            session.budget = val
+            gate.store.save_session(session)
+            # Also update in-memory session if it is live in the session manager
+            live = gate.session_manager.get(session_id)
+            if live is not None:
+                live.budget = val
+        return _session_to_dict(gate, session)
 
     @router.get("/stats")
     async def get_stats() -> dict[str, Any]:
@@ -3501,6 +3545,7 @@ def _session_to_dict(gate: Any, s: Any) -> dict[str, Any]:
         "pii_detections": s.pii_detections,
         "guardrail_detections": getattr(s, "guardrail_detections", 0),
         "parent_session_id": s.parent_session_id,
+        "budget": s.budget,
         "end_user": s.end_user,
         "cost_by_model": {k: round(v, 6) for k, v in getattr(s, "cost_by_model", {}).items()},
         "tokens_by_model": getattr(s, "tokens_by_model", {}),

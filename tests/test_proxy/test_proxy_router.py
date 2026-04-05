@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from stateloom.core.config import StateLoomConfig
@@ -71,6 +72,15 @@ def _setup_virtual_key(gate: MagicMock) -> str:
     )
     gate.store.save_virtual_key(vk)
     return full_key
+
+
+_MOCK_JSON_RESPONSE = JSONResponse(
+    content={
+        "id": "chatcmpl-test",
+        "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+        "model": "gpt-4",
+    }
+)
 
 
 class TestModelsEndpoint:
@@ -151,14 +161,18 @@ class TestChatCompletionsAuth:
 
     def test_allows_no_auth_when_not_required(self):
         gate = _make_gate(require_virtual_key=False)
-        client = TestClient(_make_app(gate))
+        app = _make_app(gate)
 
-        # Will fail because the Client.achat() will try to call real LLM,
-        # but it should get past auth (status != 401)
-        resp = client.post(
-            "/v1/chat/completions",
-            json={"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]},
-        )
+        with patch(
+            "stateloom.proxy.router._handle_provider_sdk",
+            new_callable=AsyncMock,
+            return_value=_MOCK_JSON_RESPONSE,
+        ):
+            client = TestClient(app)
+            resp = client.post(
+                "/v1/chat/completions",
+                json={"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+            )
         # Should NOT be 401
         assert resp.status_code != 401
 
@@ -206,36 +220,33 @@ class TestChatCompletionsValidation:
 
 
 class TestChatCompletionsErrorMapping:
-    """Test that StateLoom errors are mapped to OpenAI error format."""
+    """Test that StateLoom errors are mapped to OpenAI error format.
 
-    def _make_client_with_error(self, error):
-        """Create test client where achat raises the given error."""
-        gate = _make_gate(require_virtual_key=False)
-        app = _make_app(gate)
+    _handle_provider_sdk catches errors internally and returns mapped
+    JSONResponses.  These tests mock the handler to return the mapped
+    error response directly, verifying the endpoint returns it correctly.
+    """
 
-        # Patch at the module level where Client is imported in the router
-        with patch("stateloom.proxy.router.Client") as mock_client:
-            instance = MagicMock()
-            mock_client.return_value = instance
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=None)
-            instance.achat = AsyncMock(side_effect=error)
+    @staticmethod
+    def _error_response(error):
+        """Build the JSONResponse that _handle_provider_sdk would return for the error."""
+        from stateloom.proxy.errors import error_status_code, to_openai_error_dict
 
-            client = TestClient(app)
-            return client
+        return JSONResponse(
+            status_code=error_status_code(error),
+            content=to_openai_error_dict(error),
+        )
 
     def test_rate_limit_error(self):
         error = StateLoomRateLimitError("team-1", 10.0, 100)
         gate = _make_gate(require_virtual_key=False)
         app = _make_app(gate)
 
-        with patch("stateloom.proxy.router.Client") as mock_client:
-            instance = MagicMock()
-            mock_client.return_value = instance
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=None)
-            instance.achat = AsyncMock(side_effect=error)
-
+        with patch(
+            "stateloom.proxy.router._handle_provider_sdk",
+            new_callable=AsyncMock,
+            return_value=self._error_response(error),
+        ):
             client = TestClient(app)
             resp = client.post(
                 "/v1/chat/completions",
@@ -252,13 +263,11 @@ class TestChatCompletionsErrorMapping:
         gate = _make_gate(require_virtual_key=False)
         app = _make_app(gate)
 
-        with patch("stateloom.proxy.router.Client") as mock_client:
-            instance = MagicMock()
-            mock_client.return_value = instance
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=None)
-            instance.achat = AsyncMock(side_effect=error)
-
+        with patch(
+            "stateloom.proxy.router._handle_provider_sdk",
+            new_callable=AsyncMock,
+            return_value=self._error_response(error),
+        ):
             client = TestClient(app)
             resp = client.post(
                 "/v1/chat/completions",
@@ -274,13 +283,11 @@ class TestChatCompletionsErrorMapping:
         gate = _make_gate(require_virtual_key=False)
         app = _make_app(gate)
 
-        with patch("stateloom.proxy.router.Client") as mock_client:
-            instance = MagicMock()
-            mock_client.return_value = instance
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=None)
-            instance.achat = AsyncMock(side_effect=error)
-
+        with patch(
+            "stateloom.proxy.router._handle_provider_sdk",
+            new_callable=AsyncMock,
+            return_value=self._error_response(error),
+        ):
             client = TestClient(app)
             resp = client.post(
                 "/v1/chat/completions",
@@ -296,13 +303,11 @@ class TestChatCompletionsErrorMapping:
         gate = _make_gate(require_virtual_key=False)
         app = _make_app(gate)
 
-        with patch("stateloom.proxy.router.Client") as mock_client:
-            instance = MagicMock()
-            mock_client.return_value = instance
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=None)
-            instance.achat = AsyncMock(side_effect=error)
-
+        with patch(
+            "stateloom.proxy.router._handle_provider_sdk",
+            new_callable=AsyncMock,
+            return_value=self._error_response(error),
+        ):
             client = TestClient(app)
             resp = client.post(
                 "/v1/chat/completions",
@@ -316,20 +321,23 @@ class TestChatCompletionsErrorMapping:
 
 class TestChatCompletionsStreaming:
     def test_streaming_returns_sse(self):
+        from starlette.responses import StreamingResponse
+
         gate = _make_gate(require_virtual_key=False)
         app = _make_app(gate)
 
-        mock_response = MagicMock()
-        mock_response.raw = {"choices": [{"message": {"role": "assistant", "content": "streamed"}}]}
-        mock_response.content = "streamed"
+        async def _mock_sse_handler(**kwargs):
+            async def generate():
+                yield 'data: {"choices":[{"delta":{"content":"streamed"}}]}\n\n'
+                yield "data: [DONE]\n\n"
 
-        with patch("stateloom.proxy.router.Client") as mock_client:
-            instance = MagicMock()
-            mock_client.return_value = instance
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=None)
-            instance.achat = AsyncMock(return_value=mock_response)
+            return StreamingResponse(generate(), media_type="text/event-stream")
 
+        with patch(
+            "stateloom.proxy.router._handle_provider_sdk",
+            new_callable=AsyncMock,
+            side_effect=_mock_sse_handler,
+        ):
             client = TestClient(app)
             resp = client.post(
                 "/v1/chat/completions",
@@ -350,18 +358,12 @@ class TestBYOKHeaders:
     """Test Bring Your Own Key header support."""
 
     def _post_with_headers(self, gate, app, headers=None):
-        """Helper: POST to chat/completions with mock Client, return mock_client class."""
-        mock_response = MagicMock()
-        mock_response.raw = {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
-        mock_response.content = "ok"
-
-        with patch("stateloom.proxy.router.Client") as mock_client_cls:
-            instance = MagicMock()
-            mock_client_cls.return_value = instance
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=None)
-            instance.achat = AsyncMock(return_value=mock_response)
-
+        """Helper: POST to chat/completions with mock handler, return mock and its call args."""
+        with patch(
+            "stateloom.proxy.router._handle_provider_sdk",
+            new_callable=AsyncMock,
+            return_value=_MOCK_JSON_RESPONSE,
+        ) as mock_handler:
             client = TestClient(app)
             resp = client.post(
                 "/v1/chat/completions",
@@ -371,40 +373,37 @@ class TestBYOKHeaders:
                 },
                 headers=headers or {},
             )
-            return resp, mock_client_cls
+            return resp, mock_handler
 
     def test_byok_openai_key_header(self):
         gate = _make_gate(require_virtual_key=False)
         app = _make_app(gate)
-        resp, mock_client_cls = self._post_with_headers(
+        resp, mock_handler = self._post_with_headers(
             gate, app, headers={"X-StateLoom-OpenAI-Key": "sk-test-openai"}
         )
         assert resp.status_code == 200
-        call_kwargs = mock_client_cls.call_args
-        provider_keys = call_kwargs.kwargs.get("provider_keys", {})
-        assert provider_keys["openai"] == "sk-test-openai"
+        call_kwargs = mock_handler.call_args.kwargs
+        assert call_kwargs["provider_keys"]["openai"] == "sk-test-openai"
 
     def test_byok_anthropic_key_header(self):
         gate = _make_gate(require_virtual_key=False)
         app = _make_app(gate)
-        resp, mock_client_cls = self._post_with_headers(
+        resp, mock_handler = self._post_with_headers(
             gate, app, headers={"X-StateLoom-Anthropic-Key": "sk-ant-test"}
         )
         assert resp.status_code == 200
-        call_kwargs = mock_client_cls.call_args
-        provider_keys = call_kwargs.kwargs.get("provider_keys", {})
-        assert provider_keys["anthropic"] == "sk-ant-test"
+        call_kwargs = mock_handler.call_args.kwargs
+        assert call_kwargs["provider_keys"]["anthropic"] == "sk-ant-test"
 
     def test_byok_google_key_header(self):
         gate = _make_gate(require_virtual_key=False)
         app = _make_app(gate)
-        resp, mock_client_cls = self._post_with_headers(
+        resp, mock_handler = self._post_with_headers(
             gate, app, headers={"X-StateLoom-Google-Key": "AIza-test"}
         )
         assert resp.status_code == 200
-        call_kwargs = mock_client_cls.call_args
-        provider_keys = call_kwargs.kwargs.get("provider_keys", {})
-        assert provider_keys["google"] == "AIza-test"
+        call_kwargs = mock_handler.call_args.kwargs
+        assert call_kwargs["provider_keys"]["google"] == "AIza-test"
 
     def test_byok_headers_override_org_keys(self):
         gate = _make_gate(require_virtual_key=True)
@@ -414,7 +413,7 @@ class TestBYOKHeaders:
         # Set org-level secret so get_provider_keys returns it
         gate.store.save_secret("org:org-1:provider_key_openai", "sk-org-openai")
 
-        resp, mock_client_cls = self._post_with_headers(
+        resp, mock_handler = self._post_with_headers(
             gate,
             app,
             headers={
@@ -423,10 +422,9 @@ class TestBYOKHeaders:
             },
         )
         assert resp.status_code == 200
-        call_kwargs = mock_client_cls.call_args
-        provider_keys = call_kwargs.kwargs.get("provider_keys", {})
+        call_kwargs = mock_handler.call_args.kwargs
         # BYOK header should win over org secret
-        assert provider_keys["openai"] == "sk-byok-override"
+        assert call_kwargs["provider_keys"]["openai"] == "sk-byok-override"
 
     def test_byok_no_headers_uses_org_keys(self):
         gate = _make_gate(require_virtual_key=True)
@@ -436,13 +434,12 @@ class TestBYOKHeaders:
         # Set org-level secret
         gate.store.save_secret("org:org-1:provider_key_openai", "sk-org-key")
 
-        resp, mock_client_cls = self._post_with_headers(
+        resp, mock_handler = self._post_with_headers(
             gate,
             app,
             headers={"Authorization": f"Bearer {full_key}"},
         )
         assert resp.status_code == 200
-        call_kwargs = mock_client_cls.call_args
-        provider_keys = call_kwargs.kwargs.get("provider_keys", {})
+        call_kwargs = mock_handler.call_args.kwargs
         # Should use org key since no BYOK header
-        assert provider_keys.get("openai") == "sk-org-key"
+        assert call_kwargs["provider_keys"].get("openai") == "sk-org-key"

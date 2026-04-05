@@ -5,7 +5,6 @@ Agent CRUD, versioning, proxy routing, VK scoping, and dashboard verification.
 
 from __future__ import annotations
 
-import types
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -93,16 +92,16 @@ def test_agent_model_override_governance(e2e_gate):
 
     mock_response = make_openai_response("Governed response", model="gpt-4o")
 
-    with patch("stateloom.chat.Client.achat", new_callable=AsyncMock) as mock_chat:
-        mock_chat.return_value = types.SimpleNamespace(
-            raw=mock_response,
-            content="Governed response",
-            model="gpt-4o",
-            cost=0.001,
-            tokens=15,
-            provider="openai",
-        )
+    async def _mock_llm(ctx, llm_call):
+        ctx.response = mock_response
+        ctx.latency_ms = 1.0
+        return mock_response
 
+    with patch(
+        "stateloom.middleware.pipeline.Pipeline._execute_llm_call",
+        new_callable=AsyncMock,
+        side_effect=_mock_llm,
+    ):
         # Client sends model=gpt-3.5-turbo but agent forces gpt-4o
         resp = client.post(
             f"/v1/agents/{agent.slug}/chat/completions",

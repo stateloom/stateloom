@@ -10,6 +10,7 @@ import pytest
 from stateloom.intercept.adapters.anthropic_adapter import AnthropicAdapter
 from stateloom.intercept.adapters.cohere_adapter import CohereAdapter
 from stateloom.intercept.adapters.gemini_adapter import GeminiAdapter
+from stateloom.intercept.adapters.gemini_genai_adapter import GeminiGenaiAdapter
 from stateloom.intercept.adapters.mistral_adapter import MistralAdapter
 from stateloom.intercept.adapters.openai_adapter import OpenAIAdapter
 from stateloom.local.adapter import OllamaAdapter
@@ -472,6 +473,7 @@ class TestEdgeCases:
             OpenAIAdapter,
             AnthropicAdapter,
             GeminiAdapter,
+            GeminiGenaiAdapter,
             OllamaAdapter,
             MistralAdapter,
             CohereAdapter,
@@ -488,6 +490,7 @@ class TestEdgeCases:
             OpenAIAdapter,
             AnthropicAdapter,
             GeminiAdapter,
+            GeminiGenaiAdapter,
             OllamaAdapter,
             MistralAdapter,
             CohereAdapter,
@@ -504,6 +507,7 @@ class TestEdgeCases:
             OpenAIAdapter,
             AnthropicAdapter,
             GeminiAdapter,
+            GeminiGenaiAdapter,
             OllamaAdapter,
             MistralAdapter,
             CohereAdapter,
@@ -513,3 +517,209 @@ class TestEdgeCases:
         """All adapters return '' for unrelated objects."""
         adapter = adapter_cls()
         assert adapter.extract_content(object()) == ""
+
+
+# ---------------------------------------------------------------------------
+# GeminiGenai adapter — mock objects for function calling
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MockGenaiFC:
+    """Mock Gemini function_call attribute on a part."""
+
+    name: str = "get_weather"
+    args: dict = field(default_factory=lambda: {"city": "SF"})
+
+
+@dataclass
+class MockGenaiPartText:
+    """Mock Gemini part with text only."""
+
+    text: str = "Hello from GenAI"
+    function_call: MockGenaiFC | None = None
+
+
+@dataclass
+class MockGenaiPartFC:
+    """Mock Gemini part with function_call only."""
+
+    text: str = ""
+    function_call: MockGenaiFC = field(default_factory=MockGenaiFC)
+
+
+@dataclass
+class MockGenaiContent:
+    parts: list = field(default_factory=lambda: [MockGenaiPartText()])
+
+
+@dataclass
+class MockGenaiCandidate:
+    content: MockGenaiContent = field(default_factory=MockGenaiContent)
+
+
+@dataclass
+class MockGenaiUsageMeta:
+    prompt_token_count: int = 10
+    candidates_token_count: int = 15
+    total_token_count: int = 25
+
+
+@dataclass
+class MockGenaiResponse:
+    text: str = "Hello from GenAI"
+    candidates: list[MockGenaiCandidate] = field(default_factory=lambda: [MockGenaiCandidate()])
+    usage_metadata: MockGenaiUsageMeta = field(default_factory=MockGenaiUsageMeta)
+
+
+@dataclass
+class MockGenaiResponseFC:
+    """Response with a function call part (no text)."""
+
+    text: str = ""
+    candidates: list[MockGenaiCandidate] = field(
+        default_factory=lambda: [
+            MockGenaiCandidate(content=MockGenaiContent(parts=[MockGenaiPartFC()]))
+        ]
+    )
+    usage_metadata: MockGenaiUsageMeta = field(default_factory=MockGenaiUsageMeta)
+
+
+@dataclass
+class MockGenaiResponseMixed:
+    """Response with both text and function call parts."""
+
+    text: str = "Checking weather"
+    candidates: list[MockGenaiCandidate] = field(
+        default_factory=lambda: [
+            MockGenaiCandidate(
+                content=MockGenaiContent(
+                    parts=[
+                        MockGenaiPartText(text="Checking weather"),
+                        MockGenaiPartFC(),
+                    ]
+                )
+            )
+        ]
+    )
+    usage_metadata: MockGenaiUsageMeta = field(default_factory=MockGenaiUsageMeta)
+
+
+@dataclass
+class MockGenaiResponseMultiFC:
+    """Response with multiple function calls."""
+
+    text: str = ""
+    candidates: list[MockGenaiCandidate] = field(
+        default_factory=lambda: [
+            MockGenaiCandidate(
+                content=MockGenaiContent(
+                    parts=[
+                        MockGenaiPartFC(
+                            function_call=MockGenaiFC(name="get_weather", args={"city": "SF"})
+                        ),
+                        MockGenaiPartFC(
+                            function_call=MockGenaiFC(name="get_time", args={"timezone": "PST"})
+                        ),
+                    ]
+                )
+            )
+        ]
+    )
+    usage_metadata: MockGenaiUsageMeta = field(default_factory=MockGenaiUsageMeta)
+
+
+# ---------------------------------------------------------------------------
+# GeminiGenai adapter — extract_content
+# ---------------------------------------------------------------------------
+
+
+class TestGeminiGenaiExtractContent:
+    def test_text(self):
+        adapter = GeminiGenaiAdapter()
+        resp = MockGenaiResponse()
+        assert adapter.extract_content(resp) == "Hello from GenAI"
+
+    def test_function_call_only(self):
+        adapter = GeminiGenaiAdapter()
+        resp = MockGenaiResponseFC()
+        assert adapter.extract_content(resp) == ""
+
+    def test_mixed_text_and_function_call(self):
+        adapter = GeminiGenaiAdapter()
+        resp = MockGenaiResponseMixed()
+        assert adapter.extract_content(resp) == "Checking weather"
+
+
+# ---------------------------------------------------------------------------
+# GeminiGenai adapter — to_openai_dict
+# ---------------------------------------------------------------------------
+
+
+class TestGeminiGenaiToDict:
+    def test_text_response(self):
+        adapter = GeminiGenaiAdapter()
+        resp = MockGenaiResponse()
+        result = adapter.to_openai_dict(resp, "gemini-2.0-flash", "req-genai-1")
+        assert result["id"] == "req-genai-1"
+        assert result["model"] == "gemini-2.0-flash"
+        assert result["choices"][0]["message"]["content"] == "Hello from GenAI"
+        assert result["choices"][0]["finish_reason"] == "stop"
+        assert "tool_calls" not in result["choices"][0]["message"]
+        assert result["usage"]["prompt_tokens"] == 10
+        assert result["usage"]["completion_tokens"] == 15
+
+    def test_single_tool_call(self):
+        adapter = GeminiGenaiAdapter()
+        resp = MockGenaiResponseFC()
+        result = adapter.to_openai_dict(resp, "gemini-2.0-flash", "req-genai-2")
+        assert result["choices"][0]["finish_reason"] == "tool_calls"
+        tcs = result["choices"][0]["message"]["tool_calls"]
+        assert len(tcs) == 1
+        assert tcs[0]["type"] == "function"
+        assert tcs[0]["function"]["name"] == "get_weather"
+        assert tcs[0]["function"]["arguments"] == '{"city": "SF"}'
+        assert tcs[0]["id"].startswith("call_")
+
+    def test_multiple_tool_calls(self):
+        adapter = GeminiGenaiAdapter()
+        resp = MockGenaiResponseMultiFC()
+        result = adapter.to_openai_dict(resp, "gemini-2.0-flash", "req-genai-3")
+        assert result["choices"][0]["finish_reason"] == "tool_calls"
+        tcs = result["choices"][0]["message"]["tool_calls"]
+        assert len(tcs) == 2
+        assert tcs[0]["function"]["name"] == "get_weather"
+        assert tcs[1]["function"]["name"] == "get_time"
+
+
+# ---------------------------------------------------------------------------
+# GeminiGenai adapter — edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestGeminiGenaiEdgeCases:
+    def test_none_response(self):
+        adapter = GeminiGenaiAdapter()
+        assert adapter.extract_content(None) == ""
+
+    def test_unrelated_object(self):
+        adapter = GeminiGenaiAdapter()
+        assert adapter.extract_content(object()) == ""
+
+    def test_modify_response_text_none(self):
+        adapter = GeminiGenaiAdapter()
+        adapter.modify_response_text(None, str.upper)  # should not raise
+
+    def test_to_dict_with_no_usage(self):
+        """Response without usage_metadata should default to 0 tokens."""
+        adapter = GeminiGenaiAdapter()
+
+        @dataclass
+        class _Resp:
+            text: str = "hello"
+            candidates: list = field(default_factory=lambda: [MockGenaiCandidate()])
+
+        resp = _Resp()
+        result = adapter.to_openai_dict(resp, "gemini-pro", "req-x")
+        assert result["usage"]["prompt_tokens"] == 0
+        assert result["usage"]["completion_tokens"] == 0

@@ -415,7 +415,8 @@ class PIIScannerMiddleware:
 
         # Dispatch: proxy requests use the stateful CLI-aware path;
         # SDK requests use the simple per-call path.
-        if ctx.request_kwargs.get("_proxy"):
+        is_proxy = ctx.request_kwargs.get("_proxy", False)
+        if is_proxy:
             return await self._do_process_proxy(ctx, call_next)
         return await self._do_process_sdk(ctx, call_next)
 

@@ -1,8 +1,9 @@
 """FastAPI router for the OpenAI-compatible proxy endpoints.
 
 Supports HTTP passthrough for direct-to-provider forwarding (when a
-PassthroughProxy is provided) and SDK-based flow via Client as fallback.
-The agent endpoint always uses Client (agents need model/prompt overrides).
+PassthroughProxy is provided) and dedicated per-provider SDK handlers as
+fallback.  Both paths build ``MiddlewareContext`` with ``_proxy: True``
+so the PII scanner takes the stateful proxy path (Phase 1 dedup).
 """
 
 from __future__ import annotations
@@ -11,13 +12,13 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from stateloom.chat import Client, _resolve_provider
+from stateloom.chat import _resolve_provider
 from stateloom.core.errors import StateLoomRateLimitError
 from stateloom.proxy.auth import (
     AuthResult,
@@ -97,7 +98,7 @@ def create_proxy_router(
 
         Auth flow: validate virtual key → check model access, budget, and
         rate limit → resolve session → detect billing mode → route via
-        passthrough (OpenAI models) or Client (cross-provider fallback).
+        passthrough (OpenAI models) or provider SDK handler (cross-provider).
         """
         # Auth
         auth = _authenticate(authorization)
@@ -255,13 +256,16 @@ def create_proxy_router(
                 end_user=end_user,
             )
 
-        # Fallback: SDK-based flow via Client (cross-provider, or no passthrough)
-        logger.debug("Routing via Client SDK fallback: model=%s provider=%s", model, provider)
+        # Fallback: dedicated SDK handler (cross-provider, or no passthrough).
+        # Builds MiddlewareContext directly with _proxy: True so the PII
+        # scanner takes the stateful proxy path (Phase 1 dedup).
+        logger.debug("Routing via provider SDK handler: model=%s provider=%s", model, provider)
         extra_kwargs: dict[str, Any] = {}
         for key in (
             "temperature",
             "max_tokens",
             "top_p",
+            "top_k",
             "n",
             "stop",
             "presence_penalty",
@@ -276,66 +280,23 @@ def create_proxy_router(
             if key in body:
                 extra_kwargs[key] = body[key]
 
-        try:
-            client = Client(
-                session_id=session_id,
-                name=session_name,
-                org_id=vk.org_id,
-                team_id=vk.team_id,
-                provider_keys=provider_keys or None,
-                billing_mode=billing_mode,
-            )
-
-            if end_user and client._session:
-                client._session.end_user = end_user
-
-            if stream:
-                return await _handle_streaming(
-                    client,
-                    model,
-                    messages,
-                    extra_kwargs,
-                    request_id,
-                    proxy_rate_limiter=proxy_rate_limiter,
-                    vk_id=_vk_id,
-                )
-            else:
-                try:
-                    async with client:
-                        if end_user and client._session:
-                            client._session.end_user = end_user
-                        response = await client.achat(
-                            model=model, messages=messages, **extra_kwargs
-                        )
-
-                        provider = _resolve_provider(model)
-                        result = to_openai_completion_dict(
-                            response.raw, provider, model, request_id
-                        )
-                        return JSONResponse(content=result)
-                finally:
-                    if _vk_id:
-                        proxy_rate_limiter.on_request_complete(_vk_id)
-
-        except Exception as exc:
-            from stateloom.core.errors import StateLoomError
-
-            if isinstance(exc, StateLoomError):
-                status = error_status_code(exc)
-                content = to_openai_error_dict(exc)
-                return JSONResponse(status_code=status, content=content)
-
-            logger.exception("Proxy error in /v1/chat/completions")
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": {
-                        "message": f"Internal server error ({type(exc).__name__})",
-                        "type": "server_error",
-                        "code": "internal_error",
-                    }
-                },
-            )
+        return await _handle_provider_sdk(
+            gate=gate,
+            model=model,
+            provider=provider,
+            messages=messages,
+            extra_kwargs=extra_kwargs,
+            session_id=session_id,
+            session_name=session_name,
+            request_id=request_id,
+            vk=vk,
+            provider_keys=provider_keys,
+            billing_mode=billing_mode,
+            stream=stream,
+            end_user=end_user,
+            proxy_rate_limiter=proxy_rate_limiter,
+            vk_id=_vk_id,
+        )
 
     @router.post("/agents/{agent_ref}/chat/completions")
     async def agent_chat_completions(
@@ -350,7 +311,7 @@ def create_proxy_router(
     ) -> Any:
         """Agent-scoped chat completions endpoint.
 
-        Always uses the SDK-based ``Client`` flow (never HTTP passthrough)
+        Always uses the provider SDK handler (never HTTP passthrough)
         because agents need model and system-prompt overrides applied via
         ``apply_agent_overrides()`` before the LLM call.
         """
@@ -521,88 +482,45 @@ def create_proxy_router(
         if not agent_billing_mode:
             agent_billing_mode = "api"
 
-        # Route through Client (agents always use SDK-based flow)
-        try:
-            agent_metadata = {
-                "agent_id": agent.id,
-                "agent_slug": agent.slug,
-                "agent_version_id": version.id,
-                "agent_version_number": version.version_number,
-            }
+        # Route through dedicated SDK handler with agent metadata.
+        agent_metadata = {
+            "agent_id": agent.id,
+            "agent_slug": agent.slug,
+            "agent_version_id": version.id,
+            "agent_version_number": version.version_number,
+        }
 
-            def _apply_agent_fields(s: Any) -> None:
-                """Set typed agent fields + metadata dict on session."""
-                s.agent_id = agent.id
-                s.agent_slug = agent.slug
-                s.agent_version_id = version.id
-                s.agent_version_number = version.version_number
-                s.agent_name = agent.slug
-                s.metadata.update(agent_metadata)
-                s.metadata["agent_name"] = agent.slug
+        def _apply_agent_fields(s: Any) -> None:
+            """Set typed agent fields + metadata dict on session."""
+            s.agent_id = agent.id
+            s.agent_slug = agent.slug
+            s.agent_version_id = version.id
+            s.agent_version_number = version.version_number
+            s.agent_name = agent.slug
+            s.metadata.update(agent_metadata)
+            s.metadata["agent_name"] = agent.slug
 
-            agent_session_name = f"Agent: {agent.slug} / {model}"
+        agent_session_name = f"Agent: {agent.slug} / {model}"
 
-            client = Client(
-                session_id=session_id,
-                name=agent_session_name,
-                org_id=vk.org_id,
-                team_id=vk.team_id,
-                provider_keys=provider_keys or None,
-                budget=version.budget_per_session,
-                billing_mode=agent_billing_mode,
-            )
-
-            if stream:
-                return await _handle_streaming_agent(
-                    client,
-                    model,
-                    messages,
-                    extra_kwargs,
-                    request_id,
-                    agent_metadata=agent_metadata,
-                    proxy_rate_limiter=proxy_rate_limiter,
-                    vk_id=_vk_id,
-                    end_user=end_user,
-                )
-            else:
-                try:
-                    async with client:
-                        if client._session is not None:
-                            _apply_agent_fields(client._session)
-                            if end_user:
-                                client._session.end_user = end_user
-                        response = await client.achat(
-                            model=model, messages=messages, **extra_kwargs
-                        )
-
-                        provider = _resolve_provider(model)
-                        result = to_openai_completion_dict(
-                            response.raw, provider, model, request_id
-                        )
-                        return JSONResponse(content=result)
-                finally:
-                    if _vk_id:
-                        proxy_rate_limiter.on_request_complete(_vk_id)
-
-        except Exception as exc:
-            from stateloom.core.errors import StateLoomError
-
-            if isinstance(exc, StateLoomError):
-                status = error_status_code(exc)
-                content = to_openai_error_dict(exc)
-                return JSONResponse(status_code=status, content=content)
-
-            logger.exception("Agent proxy error in /v1/agents/%s", agent_ref)
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": {
-                        "message": f"Internal server error ({type(exc).__name__})",
-                        "type": "server_error",
-                        "code": "internal_error",
-                    }
-                },
-            )
+        return await _handle_provider_sdk(
+            gate=gate,
+            model=model,
+            provider=_resolve_provider(model),
+            messages=messages,
+            extra_kwargs=extra_kwargs,
+            session_id=session_id,
+            session_name=agent_session_name,
+            request_id=request_id,
+            vk=vk,
+            provider_keys=provider_keys,
+            billing_mode=agent_billing_mode,
+            stream=stream,
+            end_user=end_user,
+            proxy_rate_limiter=proxy_rate_limiter,
+            vk_id=_vk_id,
+            budget=version.budget_per_session,
+            agent_fields_fn=_apply_agent_fields,
+        )
 
     @router.get("/health")
     async def health() -> dict[str, str]:
@@ -695,9 +613,14 @@ async def _handle_openai_passthrough(
     upstream_base = gate.config.proxy.upstream_openai
     upstream_url = f"{upstream_base}/v1/chat/completions"
 
-    # Build upstream headers — use BYOK key or resolved provider key
+    # Build upstream headers — resolve OpenAI API key for passthrough.
+    # Priority: BYOK header > org secrets > env var > raw bearer passthrough
+    import os
+
     auth_value = provider_keys.get("openai", "")
-    # Also check Authorization header for direct BYOK passthrough
+    if not auth_value:
+        auth_value = os.environ.get("OPENAI_API_KEY", "")
+    # Last resort: raw bearer passthrough (for clients sending their own key)
     if not auth_value:
         raw_bearer = strip_bearer(request.headers.get("authorization", ""))
         if raw_bearer and not raw_bearer.startswith("ag-"):
@@ -753,10 +676,15 @@ async def _handle_openai_passthrough(
                         ctx.skip_call = False
                         ctx.cached_response = None
 
+                # Inject stream_options to get usage in the final chunk
+                stream_body = body.copy()
+                stream_body.setdefault("stream_options", {})["include_usage"] = True
+                raw_stream_body = json.dumps(stream_body).encode()
+
                 return await _handle_streaming_openai_passthrough(
                     passthrough,
                     upstream_url,
-                    raw_body,
+                    raw_stream_body,
                     upstream_headers,
                     request_id=request_id,
                     model=model,
@@ -813,6 +741,484 @@ async def _handle_openai_passthrough(
             return JSONResponse(status_code=status, content=content)
 
         logger.exception("Proxy error in OpenAI passthrough")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "message": f"Internal server error ({type(exc).__name__})",
+                    "type": "server_error",
+                    "code": "internal_error",
+                }
+            },
+        )
+    finally:
+        if vk_id:
+            proxy_rate_limiter.on_request_complete(vk_id)
+
+
+def _build_gemini_llm_call(
+    request_kwargs: dict[str, Any],
+    provider_keys: dict[str, str],
+    model: str,
+) -> Callable[[], Any]:
+    """Build a Gemini SDK call closure for the proxy SDK fallback path.
+
+    Mirrors ``GeminiGenaiAdapter.prepare_chat()`` / ``GeminiAdapter.prepare_chat()``.
+    Re-reads ``messages`` from *request_kwargs* at call time so PII redaction
+    propagates.  Uses ``get_original()`` to avoid double interception.
+    """
+    # Capture closure references — gen_config is pre-computed, but messages
+    # are re-read at call time from the same dict middleware modifies.
+    gen_config: dict[str, Any] = {}
+    for k in ("temperature", "top_p", "top_k"):
+        if k in request_kwargs:
+            gen_config[k] = request_kwargs[k]
+    if "max_tokens" in request_kwargs:
+        gen_config["max_output_tokens"] = request_kwargs["max_tokens"]
+    if "max_output_tokens" in request_kwargs:
+        gen_config["max_output_tokens"] = request_kwargs["max_output_tokens"]
+
+    _rk = request_kwargs
+    keys = provider_keys
+
+    def llm_call() -> Any:
+        from stateloom.intercept.unpatch import get_original
+
+        # Try the new google-genai SDK first, fall back to legacy google-generativeai
+        try:
+            from google.genai import Client as GenaiClient
+            from google.genai import models as genai_models
+
+            use_new_sdk = True
+        except ImportError:
+            use_new_sdk = False
+
+        if use_new_sdk:
+            # Import the full message converter from the genai adapter
+            from stateloom.intercept.adapters.gemini_genai_adapter import (
+                _convert_messages,
+                _convert_openai_tools,
+                _convert_tool_choice,
+            )
+
+            live_messages = _rk.get("messages", [])
+            live_contents, live_system = _convert_messages(live_messages)
+
+            client_kwargs: dict[str, Any] = {}
+            if keys.get("google"):
+                client_kwargs["api_key"] = keys["google"]
+            client = GenaiClient(**client_kwargs)
+
+            call_kwargs: dict[str, Any] = {
+                "model": model,
+                "contents": live_contents,
+            }
+            if live_system:
+                call_kwargs["config"] = {"system_instruction": live_system}
+            if gen_config:
+                config = call_kwargs.setdefault("config", {})
+                config.update(gen_config)
+
+            # Tools
+            openai_tools = _rk.get("tools")
+            if openai_tools:
+                declarations = _convert_openai_tools(openai_tools)
+                if declarations:
+                    config = call_kwargs.setdefault("config", {})
+                    config["tools"] = [{"function_declarations": declarations}]
+            tool_choice = _rk.get("tool_choice")
+            if tool_choice is not None:
+                config = call_kwargs.setdefault("config", {})
+                config["tool_config"] = _convert_tool_choice(tool_choice)
+
+            original = get_original(genai_models.Models, "generate_content")
+            if original:
+                return original(client.models, **call_kwargs)
+            return client.models.generate_content(**call_kwargs)
+
+        # Legacy google-generativeai fallback
+        try:
+            from google.generativeai import GenerativeModel  # type: ignore[attr-defined]
+        except ImportError:
+            raise ImportError(
+                "google-genai or google-generativeai package is required for Gemini models. "
+                "Install with: pip install google-genai"
+            )
+
+        if keys.get("google"):
+            import google.generativeai as genai
+
+            genai.configure(api_key=keys["google"])  # type: ignore[attr-defined]
+
+        live_messages = _rk.get("messages", [])
+        live_contents_legacy: list[dict[str, Any]] = []
+        live_system: str | None = None  # type: ignore[no-redef]
+        for msg in live_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                live_system = content if isinstance(content, str) else str(content)
+                continue
+            gemini_role = "model" if role == "assistant" else "user"
+            live_contents_legacy.append({"role": gemini_role, "parts": [{"text": str(content)}]})
+
+        gen_model = GenerativeModel(model, system_instruction=live_system)
+        original = get_original(GenerativeModel, "generate_content")
+        if original:
+            return original(gen_model, live_contents_legacy, generation_config=gen_config or None)
+        return gen_model.generate_content(
+            live_contents_legacy,  # type: ignore[arg-type]
+            generation_config=gen_config or None,  # type: ignore[arg-type]
+        )
+
+    return llm_call
+
+
+def _build_anthropic_llm_call(
+    request_kwargs: dict[str, Any],
+    provider_keys: dict[str, str],
+    model: str,
+) -> Callable[[], Any]:
+    """Build an Anthropic SDK call closure for the proxy SDK fallback path.
+
+    Mirrors ``AnthropicAdapter.prepare_chat()``.  Reads specific fields from
+    *request_kwargs* at call time (never spreads ``**request_kwargs``).
+    Uses ``get_original()`` to avoid double interception.
+    """
+    _rk = request_kwargs
+    keys = provider_keys
+
+    def llm_call() -> Any:
+        import anthropic
+
+        from stateloom.intercept.adapters.anthropic_adapter import (
+            _convert_messages,
+            _convert_openai_tools,
+            _convert_tool_choice,
+        )
+        from stateloom.intercept.unpatch import get_original
+
+        ctor_kwargs: dict[str, Any] = {
+            "base_url": "https://api.anthropic.com",
+        }
+        if keys.get("anthropic"):
+            ctor_kwargs["api_key"] = keys["anthropic"]
+        client = anthropic.Anthropic(**ctor_kwargs)
+
+        # Convert messages from OpenAI format to Anthropic format at call time
+        # so middleware modifications (e.g. PII redaction) are reflected.
+        live_messages = _rk.get("messages", [])
+        converted_msgs, converted_system = _convert_messages(live_messages)
+
+        sdk_kwargs: dict[str, Any] = {
+            "model": _rk.get("model", model),
+            "messages": converted_msgs,
+            "max_tokens": _rk.get("max_tokens", 4096),
+        }
+
+        # System prompt: prefer already-extracted _rk["system"], fall back to converted
+        system = _rk.get("system")
+        if system:
+            sdk_kwargs["system"] = system
+        elif converted_system:
+            sdk_kwargs["system"] = converted_system
+
+        for k in ("temperature", "top_p", "stop"):
+            if k in _rk:
+                sdk_kwargs[k] = _rk[k]
+
+        # Convert tools from OpenAI to Anthropic format
+        openai_tools = _rk.get("tools")
+        if openai_tools:
+            sdk_kwargs["tools"] = _convert_openai_tools(openai_tools)
+
+        # Convert tool_choice
+        openai_tool_choice = _rk.get("tool_choice")
+        if openai_tool_choice is not None:
+            converted_tc = _convert_tool_choice(openai_tool_choice)
+            if converted_tc is None:
+                # "none" → omit tools entirely
+                sdk_kwargs.pop("tools", None)
+            else:
+                sdk_kwargs["tool_choice"] = converted_tc
+
+        original = get_original(type(client.messages), "create")
+        if original:
+            return original(client.messages, **sdk_kwargs)
+        return client.messages.create(**sdk_kwargs)
+
+    return llm_call
+
+
+def _build_openai_compat_llm_call(
+    request_kwargs: dict[str, Any],
+    provider_keys: dict[str, str],
+    model: str,
+    provider: str,
+) -> Callable[[], Any]:
+    """Build an OpenAI-compatible SDK call closure for fallback providers.
+
+    Handles Cohere, Mistral, and unknown providers that expose an
+    OpenAI-compatible API.  Reads specific fields from *request_kwargs*.
+    Uses ``get_original()`` to avoid double interception.
+    """
+    _rk = request_kwargs
+    keys = provider_keys
+
+    # Resolve API key and base URL for the provider
+    _base_urls: dict[str, str] = {
+        "mistral": "https://api.mistral.ai/v1",
+        "cohere": "https://api.cohere.ai/compatibility/v1",
+    }
+
+    def llm_call() -> Any:
+        import openai
+
+        from stateloom.intercept.unpatch import get_original
+
+        ctor_kwargs: dict[str, Any] = {}
+        api_key = keys.get(provider) or keys.get("openai", "")
+        if api_key:
+            ctor_kwargs["api_key"] = api_key
+        base_url = _base_urls.get(provider)
+        if base_url:
+            ctor_kwargs["base_url"] = base_url
+
+        client = openai.OpenAI(**ctor_kwargs)
+
+        # Build SDK kwargs from specific fields
+        sdk_kwargs: dict[str, Any] = {
+            "model": _rk.get("model", model),
+            "messages": _rk.get("messages", []),
+        }
+        for k in (
+            "temperature",
+            "max_tokens",
+            "top_p",
+            "n",
+            "stop",
+            "presence_penalty",
+            "frequency_penalty",
+            "logit_bias",
+            "user",
+            "tools",
+            "tool_choice",
+            "response_format",
+            "seed",
+        ):
+            if k in _rk:
+                sdk_kwargs[k] = _rk[k]
+
+        original = get_original(type(client.chat.completions), "create")
+        if original:
+            return original(client.chat.completions, **sdk_kwargs)
+        return client.chat.completions.create(**sdk_kwargs)
+
+    return llm_call
+
+
+async def _handle_provider_sdk(
+    *,
+    gate: Gate,
+    model: str,
+    provider: str,
+    messages: list[dict[str, Any]],
+    extra_kwargs: dict[str, Any],
+    session_id: str,
+    session_name: str,
+    request_id: str,
+    vk: Any,
+    provider_keys: dict[str, str],
+    billing_mode: str,
+    stream: bool,
+    end_user: str,
+    proxy_rate_limiter: ProxyRateLimiter,
+    vk_id: str | None,
+    budget: float | None = None,
+    agent_fields_fn: Callable[[Any], None] | None = None,
+) -> Response:
+    """Unified provider SDK handler for the proxy fallback path.
+
+    Replaces the old ``Client.achat()``-based fallback.  Builds
+    ``MiddlewareContext`` directly with ``_proxy: True`` so the PII
+    scanner takes the stateful proxy path (Phase 1 dedup).
+
+    Args:
+        gate: The Gate singleton.
+        model: Requested model.
+        provider: Resolved provider name.
+        messages: Chat messages (OpenAI format).
+        extra_kwargs: Additional provider-specific params from request body.
+        session_id: Resolved session ID.
+        session_name: Human-readable session label.
+        request_id: Generated ``chatcmpl-*`` ID.
+        vk: Virtual key or stub.
+        provider_keys: Resolved BYOK/org provider keys.
+        billing_mode: ``"api"`` or ``"subscription"``.
+        stream: Whether streaming was requested.
+        end_user: Sanitized end-user attribution string.
+        proxy_rate_limiter: Rate limiter for slot release.
+        vk_id: Virtual key ID for rate limit tracking (or None).
+        budget: Optional per-session budget (for agents).
+        agent_fields_fn: Optional callback to set agent metadata on session.
+
+    Returns:
+        A ``JSONResponse`` or ``StreamingResponse``.
+    """
+    from stateloom.middleware.base import MiddlewareContext
+
+    try:
+        session_kwargs: dict[str, Any] = {
+            "session_id": session_id,
+            "name": session_name,
+            "org_id": vk.org_id,
+            "team_id": vk.team_id,
+        }
+        if budget is not None:
+            session_kwargs["budget"] = budget
+
+        async with gate.async_session(**session_kwargs) as session:
+            session.billing_mode = billing_mode
+            session.metadata["billing_mode"] = billing_mode
+            if end_user:
+                session.end_user = end_user
+            if agent_fields_fn:
+                agent_fields_fn(session)
+            session.next_step()
+
+            # Build request_kwargs with _proxy flag — this is the key fix.
+            # The PII scanner checks this flag to dispatch to the stateful
+            # proxy path (Phase 1 dedup) instead of the stateless SDK path.
+            request_kwargs: dict[str, Any] = {
+                "messages": messages,
+                "model": model,
+                "_proxy": True,
+            }
+
+            # Anthropic: extract system prompt from messages
+            if provider == "anthropic":
+                system_parts: list[str] = []
+                non_system: list[dict[str, Any]] = []
+                for msg in messages:
+                    if msg.get("role") == "system":
+                        content = msg.get("content", "")
+                        if isinstance(content, str):
+                            system_parts.append(content)
+                        elif isinstance(content, list):
+                            for block in content:
+                                if isinstance(block, dict) and block.get("type") == "text":
+                                    system_parts.append(block.get("text", ""))
+                    else:
+                        non_system.append(msg)
+                request_kwargs["messages"] = non_system
+                request_kwargs["max_tokens"] = extra_kwargs.pop("max_tokens", 4096)
+                if system_parts:
+                    request_kwargs["system"] = "\n\n".join(system_parts)
+
+            # Copy known extra kwargs into request_kwargs
+            for k in (
+                "temperature",
+                "max_tokens",
+                "top_p",
+                "top_k",
+                "n",
+                "stop",
+                "presence_penalty",
+                "frequency_penalty",
+                "logit_bias",
+                "user",
+                "tools",
+                "tool_choice",
+                "response_format",
+                "seed",
+            ):
+                if k in extra_kwargs:
+                    request_kwargs[k] = extra_kwargs[k]
+
+            # Build the provider-specific llm_call closure
+            if provider == "gemini":
+                llm_call = _build_gemini_llm_call(request_kwargs, provider_keys, model)
+            elif provider == "anthropic":
+                llm_call = _build_anthropic_llm_call(request_kwargs, provider_keys, model)
+            else:
+                llm_call = _build_openai_compat_llm_call(
+                    request_kwargs, provider_keys, model, provider
+                )
+
+            ctx = MiddlewareContext(
+                session=session,
+                config=gate.config,
+                provider=provider,
+                model=model,
+                method="chat.completions.create",
+                request_kwargs=request_kwargs,
+                request_hash=""
+                if stream
+                else gate.pipeline._hash_request(
+                    {"messages": request_kwargs["messages"], "model": model}
+                ),
+            )
+
+            if stream:
+                # Buffer-then-emit: pipeline runs the full LLM call and gets
+                # the complete response.  We do NOT set ctx.is_streaming here
+                # because from the middleware perspective the response is fully
+                # buffered (not chunked).  Setting is_streaming would cause
+                # EventRecorder to defer persistence to _on_stream_complete
+                # callbacks that are never fired in this path.
+                result = await gate.pipeline.execute(ctx, llm_call)
+
+                provider_for_convert = provider
+                full = to_openai_completion_dict(result, provider_for_convert, model, request_id)
+
+                async def generate() -> AsyncGenerator[str, None]:
+                    choices = full.get("choices", [])
+                    if choices:
+                        role_chunk = {
+                            "id": request_id,
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": full.get("model", ""),
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {"role": "assistant"},
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                        yield to_openai_sse_event(role_chunk)
+
+                        content_chunk = _completion_to_chunk(full, request_id)
+                        for c in content_chunk.get("choices", []):
+                            c.get("delta", {}).pop("role", None)
+                        yield to_openai_sse_event(content_chunk)
+                    else:
+                        chunk = _completion_to_chunk(full, request_id)
+                        yield to_openai_sse_event(chunk)
+
+                    yield to_openai_done_event()
+
+                return StreamingResponse(
+                    generate(),
+                    media_type="text/event-stream",
+                    headers=SSE_HEADERS,
+                )
+
+            else:
+                result = await gate.pipeline.execute(ctx, llm_call)
+                converted = to_openai_completion_dict(result, provider, model, request_id)
+                return JSONResponse(content=converted)
+
+    except Exception as exc:
+        from stateloom.core.errors import StateLoomError
+
+        if isinstance(exc, StateLoomError):
+            status = error_status_code(exc)
+            content = to_openai_error_dict(exc)
+            return JSONResponse(status_code=status, content=content)
+
+        logger.exception("Proxy error in provider SDK handler")
         return JSONResponse(
             status_code=500,
             content={
@@ -920,201 +1326,6 @@ def _emit_openai_cached_as_stream(
             yield to_openai_sse_event(content_chunk)
 
         yield to_openai_done_event()
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers=SSE_HEADERS,
-    )
-
-
-async def _handle_streaming(
-    client: Any,
-    model: str,
-    messages: list[dict[str, Any]],
-    extra_kwargs: dict[str, Any],
-    request_id: str,
-    proxy_rate_limiter: ProxyRateLimiter | None = None,
-    vk_id: str | None = None,
-) -> StreamingResponse:
-    """SDK-based streaming handler (buffer-then-emit pattern).
-
-    The full response is obtained via ``client.achat()`` first, then
-    converted to SSE chunk events and emitted.  This is not true token-by-
-    token streaming; it simulates it so the client receives a well-formed
-    SSE stream.
-
-    Args:
-        client: ``Client`` instance (session will be opened in the generator).
-        model: Requested model.
-        messages: Chat messages.
-        extra_kwargs: Additional provider-specific params.
-        request_id: Generated ``chatcmpl-*`` ID.
-        proxy_rate_limiter: Rate limiter for slot release.
-        vk_id: Virtual key ID for rate limit tracking (or None).
-
-    Returns:
-        A ``StreamingResponse`` with ``text/event-stream`` media type.
-    """
-
-    async def generate() -> AsyncGenerator[str, None]:
-        try:
-            async with client:
-                response = await client.achat(model=model, messages=messages, **extra_kwargs)
-
-                provider = _resolve_provider(model)
-                full = to_openai_completion_dict(response.raw, provider, model, request_id)
-
-                choices = full.get("choices", [])
-                if choices:
-                    role_chunk = {
-                        "id": request_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": full.get("model", ""),
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"role": "assistant"},
-                                "finish_reason": None,
-                            }
-                        ],
-                    }
-                    yield to_openai_sse_event(role_chunk)
-
-                    content_chunk = _completion_to_chunk(full, request_id)
-                    for c in content_chunk.get("choices", []):
-                        c.get("delta", {}).pop("role", None)
-                    yield to_openai_sse_event(content_chunk)
-                else:
-                    chunk = _completion_to_chunk(full, request_id)
-                    yield to_openai_sse_event(chunk)
-
-                yield to_openai_done_event()
-
-        except Exception as exc:
-            from stateloom.core.errors import StateLoomError
-
-            if isinstance(exc, StateLoomError):
-                error = to_openai_error_dict(exc)
-            else:
-                error = {
-                    "error": {
-                        "message": f"Internal server error ({type(exc).__name__})",
-                        "type": "server_error",
-                        "code": "internal_error",
-                    }
-                }
-            yield f"data: {json.dumps(error)}\n\n"
-            yield to_openai_done_event()
-        finally:
-            if proxy_rate_limiter and vk_id:
-                proxy_rate_limiter.on_request_complete(vk_id)
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers=SSE_HEADERS,
-    )
-
-
-async def _handle_streaming_agent(
-    client: Any,
-    model: str,
-    messages: list[dict[str, Any]],
-    extra_kwargs: dict[str, Any],
-    request_id: str,
-    agent_metadata: dict[str, Any] | None = None,
-    proxy_rate_limiter: ProxyRateLimiter | None = None,
-    vk_id: str | None = None,
-    end_user: str = "",
-) -> StreamingResponse:
-    """Agent-scoped streaming handler — injects agent metadata on session.
-
-    Args:
-        client: ``Client`` instance.
-        model: Resolved model (from agent version override).
-        messages: Messages with agent system prompt prepended.
-        extra_kwargs: Merged request overrides from agent version.
-        request_id: Generated ``chatcmpl-*`` ID.
-        agent_metadata: Dict with ``agent_id``, ``agent_slug``, etc.
-        proxy_rate_limiter: Rate limiter for slot release.
-        vk_id: Virtual key ID (or None).
-
-    Returns:
-        A ``StreamingResponse`` with ``text/event-stream`` media type.
-    """
-
-    async def generate() -> AsyncGenerator[str, None]:
-        try:
-            async with client:
-                if client._session is not None:
-                    if agent_metadata:
-                        client._session.metadata.update(agent_metadata)
-                        client._session.agent_id = agent_metadata.get("agent_id", "")
-                        client._session.agent_slug = agent_metadata.get("agent_slug", "")
-                        client._session.agent_version_id = agent_metadata.get(
-                            "agent_version_id", ""
-                        )
-                        client._session.agent_version_number = agent_metadata.get(
-                            "agent_version_number", 0
-                        )
-                        slug = agent_metadata.get("agent_slug", "")
-                        if slug:
-                            client._session.agent_name = slug
-                            client._session.metadata["agent_name"] = slug
-                    if end_user:
-                        client._session.end_user = end_user
-                response = await client.achat(model=model, messages=messages, **extra_kwargs)
-
-                provider = _resolve_provider(model)
-                full = to_openai_completion_dict(response.raw, provider, model, request_id)
-
-                choices = full.get("choices", [])
-                if choices:
-                    role_chunk = {
-                        "id": request_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": full.get("model", ""),
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"role": "assistant"},
-                                "finish_reason": None,
-                            }
-                        ],
-                    }
-                    yield to_openai_sse_event(role_chunk)
-
-                    content_chunk = _completion_to_chunk(full, request_id)
-                    for c in content_chunk.get("choices", []):
-                        c.get("delta", {}).pop("role", None)
-                    yield to_openai_sse_event(content_chunk)
-                else:
-                    chunk = _completion_to_chunk(full, request_id)
-                    yield to_openai_sse_event(chunk)
-
-                yield to_openai_done_event()
-
-        except Exception as exc:
-            from stateloom.core.errors import StateLoomError
-
-            if isinstance(exc, StateLoomError):
-                error = to_openai_error_dict(exc)
-            else:
-                error = {
-                    "error": {
-                        "message": f"Internal server error ({type(exc).__name__})",
-                        "type": "server_error",
-                        "code": "internal_error",
-                    }
-                }
-            yield f"data: {json.dumps(error)}\n\n"
-            yield to_openai_done_event()
-        finally:
-            if proxy_rate_limiter and vk_id:
-                proxy_rate_limiter.on_request_complete(vk_id)
 
     return StreamingResponse(
         generate(),

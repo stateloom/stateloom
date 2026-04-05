@@ -337,34 +337,31 @@ class TestRouterRateLimitIntegration:
         body = {"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]}
         headers = {"Authorization": f"Bearer {full_key}"}
 
-        # Mock Client to avoid actual LLM calls
-        mock_response = MagicMock()
-        mock_response.raw = MagicMock()
-        mock_achat = AsyncMock(return_value=mock_response)
+        # Mock _handle_provider_sdk to avoid actual LLM calls
+        from fastapi.responses import JSONResponse as _JSONResponse
 
-        with patch("stateloom.proxy.router.Client") as MockClient:
-            instance = AsyncMock()
-            instance.achat = mock_achat
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
+        mock_json = _JSONResponse(
+            content={
+                "id": "test",
+                "choices": [{"message": {"content": "hello"}, "finish_reason": "stop"}],
+                "model": "gpt-4",
+            }
+        )
 
-            with patch("stateloom.proxy.router.to_openai_completion_dict") as mock_convert:
-                mock_convert.return_value = {
-                    "id": "test",
-                    "choices": [{"message": {"content": "hello"}, "finish_reason": "stop"}],
-                    "model": "gpt-4",
-                }
+        with patch(
+            "stateloom.proxy.router._handle_provider_sdk",
+            new_callable=AsyncMock,
+            return_value=mock_json,
+        ):
+            # First request — should pass
+            resp1 = client.post("/v1/chat/completions", json=body, headers=headers)
+            assert resp1.status_code == 200
 
-                # First request — should pass
-                resp1 = client.post("/v1/chat/completions", json=body, headers=headers)
-                assert resp1.status_code == 200
-
-                # Second request — should be rate limited (429)
-                resp2 = client.post("/v1/chat/completions", json=body, headers=headers)
-                assert resp2.status_code == 429
-                data = resp2.json()
-                assert data["error"]["code"] == "key_rate_limit_exceeded"
+            # Second request — should be rate limited (429)
+            resp2 = client.post("/v1/chat/completions", json=body, headers=headers)
+            assert resp2.status_code == 429
+            data = resp2.json()
+            assert data["error"]["code"] == "key_rate_limit_exceeded"
 
 
 class TestProxyRateLimiterMetrics:

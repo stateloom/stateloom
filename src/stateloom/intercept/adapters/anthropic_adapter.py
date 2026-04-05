@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -284,3 +286,151 @@ class AnthropicAdapter(BaseProviderAdapter):
             return method(**request_kwargs)
 
         return request_kwargs, llm_call
+
+
+# ---------------------------------------------------------------------------
+# OpenAI → Anthropic format conversion helpers (used by proxy router)
+# ---------------------------------------------------------------------------
+
+
+def _convert_openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert OpenAI tool definitions to Anthropic tool format.
+
+    OpenAI: ``{"type": "function", "function":
+    {"name": ..., "description": ..., "parameters": ...}}``
+    Anthropic: ``{"name": ..., "description": ..., "input_schema": ...}``
+    """
+    result: list[dict[str, Any]] = []
+    for tool in tools:
+        if tool.get("type") != "function":
+            continue
+        func = tool.get("function", {})
+        entry: dict[str, Any] = {"name": func.get("name", "")}
+        if func.get("description"):
+            entry["description"] = func["description"]
+        params = func.get("parameters")
+        if params:
+            entry["input_schema"] = params
+        else:
+            entry["input_schema"] = {"type": "object", "properties": {}}
+        result.append(entry)
+    return result
+
+
+def _convert_tool_choice(tool_choice: str | dict[str, Any]) -> dict[str, Any] | None:
+    """Convert OpenAI ``tool_choice`` to Anthropic format.
+
+    - ``"auto"`` → ``{"type": "auto"}``
+    - ``"required"`` → ``{"type": "any"}``
+    - ``"none"`` → ``None`` (signal to omit tools)
+    - ``{"type": "function", "function": {"name": "X"}}`` → ``{"type": "tool", "name": "X"}``
+    """
+    if isinstance(tool_choice, str):
+        if tool_choice == "auto":
+            return {"type": "auto"}
+        if tool_choice == "required":
+            return {"type": "any"}
+        if tool_choice == "none":
+            return None
+        return {"type": "auto"}
+
+    if isinstance(tool_choice, dict):
+        func = tool_choice.get("function", {})
+        name = func.get("name", "")
+        if name:
+            return {"type": "tool", "name": name}
+
+    return {"type": "auto"}
+
+
+def _convert_messages(
+    messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Convert OpenAI-format messages to Anthropic format.
+
+    Handles:
+    - ``role="system"`` → extracted as separate system string
+    - ``role="assistant"`` with ``tool_calls`` → content blocks with ``type="tool_use"``
+    - ``role="tool"`` → ``type="tool_result"`` blocks (merged into preceding user message)
+    - Plain user/assistant text messages (string and list content)
+
+    Returns ``(converted_messages, system_prompt_or_none)``.
+    """
+    converted: list[dict[str, Any]] = []
+    system_parts: list[str] = []
+
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+
+        # System → extract
+        if role == "system":
+            if isinstance(content, str):
+                system_parts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        system_parts.append(block.get("text", ""))
+            continue
+
+        # Assistant with tool_calls → tool_use content blocks
+        if role == "assistant" and msg.get("tool_calls"):
+            blocks: list[dict[str, Any]] = []
+            if content:
+                if isinstance(content, str):
+                    blocks.append({"type": "text", "text": content})
+                elif isinstance(content, list):
+                    blocks.extend(content)
+
+            for tc in msg["tool_calls"]:
+                func = tc.get("function", {})
+                args_str = func.get("arguments", "{}")
+                try:
+                    args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc.get("id", f"toolu_{uuid.uuid4().hex[:24]}"),
+                        "name": func.get("name", ""),
+                        "input": args,
+                    }
+                )
+
+            converted.append({"role": "assistant", "content": blocks})
+            continue
+
+        # Tool result → tool_result block in a user message
+        if role == "tool":
+            tool_result_block: dict[str, Any] = {
+                "type": "tool_result",
+                "tool_use_id": msg.get("tool_call_id", ""),
+            }
+            if content:
+                tool_result_block["content"] = str(content)
+
+            # Merge consecutive tool results into the same user message
+            if (
+                converted
+                and converted[-1].get("role") == "user"
+                and isinstance(converted[-1].get("content"), list)
+                and converted[-1]["content"]
+                and isinstance(converted[-1]["content"][0], dict)
+                and converted[-1]["content"][0].get("type") == "tool_result"
+            ):
+                converted[-1]["content"].append(tool_result_block)
+            else:
+                converted.append({"role": "user", "content": [tool_result_block]})
+            continue
+
+        # Plain assistant message
+        if role == "assistant":
+            converted.append({"role": "assistant", "content": content})
+            continue
+
+        # User or other roles — pass through
+        converted.append({"role": role, "content": content})
+
+    system = "\n\n".join(system_parts) if system_parts else None
+    return converted, system

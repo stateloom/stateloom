@@ -209,17 +209,20 @@ class TestAgentProxyResolution:
 
 
 class TestAgentProxyOverrides:
-    """Override application tests via mocked Client."""
+    """Override application tests via mocked _handle_provider_sdk."""
 
-    @patch("stateloom.proxy.router.Client")
-    def test_model_override_applied(self, MockClient):
+    @patch("stateloom.proxy.router._handle_provider_sdk", new_callable=AsyncMock)
+    def test_model_override_applied(self, mock_handler):
         """Agent's model should override any client-sent model."""
+        from fastapi.responses import JSONResponse as _JSONResponse
+
+        mock_handler.return_value = _JSONResponse(
+            content={"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+        )
+
         gate = _make_gate()
         _setup_agent(gate, model="gpt-4o")
         full_key = _setup_vk(gate)
-
-        mock_instance = _make_mock_client(_make_mock_raw("Hello", "gpt-4o"))
-        MockClient.return_value = mock_instance
 
         client = TestClient(_make_app(gate))
         resp = client.post(
@@ -232,20 +235,23 @@ class TestAgentProxyOverrides:
         )
 
         assert resp.status_code == 200
-        # Verify the model passed to achat was the agent's model
-        call_kwargs = mock_instance.achat.call_args
-        assert call_kwargs.kwargs.get("model") or call_kwargs.args[0] == "gpt-4o"
+        # Verify the model passed to _handle_provider_sdk was the agent's model
+        call_kwargs = mock_handler.call_args.kwargs
+        assert call_kwargs["model"] == "gpt-4o"
 
-    @patch("stateloom.proxy.router.Client")
-    def test_system_prompt_applied(self, MockClient):
+    @patch("stateloom.proxy.router._handle_provider_sdk", new_callable=AsyncMock)
+    def test_system_prompt_applied(self, mock_handler):
         """Agent's system prompt should be prepended."""
+        from fastapi.responses import JSONResponse as _JSONResponse
+
+        mock_handler.return_value = _JSONResponse(
+            content={"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+        )
+
         gate = _make_gate()
         _setup_agent(gate, system_prompt="Be concise.")
         full_key = _setup_vk(gate)
 
-        mock_instance = _make_mock_client(_make_mock_raw("Hi", "gpt-4o"))
-        MockClient.return_value = mock_instance
-
         client = TestClient(_make_app(gate))
         resp = client.post(
             "/v1/agents/legal-bot/chat/completions",
@@ -256,24 +262,25 @@ class TestAgentProxyOverrides:
         )
         assert resp.status_code == 200
 
-        # Verify system prompt was added
-        call_kwargs = mock_instance.achat.call_args
-        messages = call_kwargs.kwargs.get("messages", [])
+        # Verify system prompt was added to messages
+        call_kwargs = mock_handler.call_args.kwargs
+        messages = call_kwargs["messages"]
         assert messages[0]["role"] == "system"
         assert "Be concise." in messages[0]["content"]
 
-    @patch("stateloom.proxy.router.Client")
-    def test_session_metadata_injected(self, MockClient):
-        """Agent metadata should be set on the session."""
+    @patch("stateloom.proxy.router._handle_provider_sdk", new_callable=AsyncMock)
+    def test_session_metadata_injected(self, mock_handler):
+        """Agent metadata callback should be passed to the handler."""
+        from fastapi.responses import JSONResponse as _JSONResponse
+
+        mock_handler.return_value = _JSONResponse(
+            content={"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+        )
+
         gate = _make_gate()
         agent, version = _setup_agent(gate)
         full_key = _setup_vk(gate)
 
-        mock_instance = _make_mock_client(_make_mock_raw("Hi", "gpt-4o"))
-        session_metadata = {}
-        mock_instance._session.metadata = session_metadata
-        MockClient.return_value = mock_instance
-
         client = TestClient(_make_app(gate))
         resp = client.post(
             "/v1/agents/legal-bot/chat/completions",
@@ -284,8 +291,17 @@ class TestAgentProxyOverrides:
         )
         assert resp.status_code == 200
 
-        # Verify agent metadata was injected
-        assert session_metadata["agent_id"] == agent.id
-        assert session_metadata["agent_slug"] == "legal-bot"
-        assert session_metadata["agent_version_id"] == version.id
-        assert session_metadata["agent_version_number"] == 1
+        # Verify agent_fields_fn was passed and works correctly
+        call_kwargs = mock_handler.call_args.kwargs
+        agent_fields_fn = call_kwargs["agent_fields_fn"]
+        assert agent_fields_fn is not None
+
+        # Call the function on a mock session to verify it sets the right fields
+        mock_session = MagicMock()
+        mock_session.metadata = {}
+        agent_fields_fn(mock_session)
+        assert mock_session.agent_id == agent.id
+        assert mock_session.agent_slug == "legal-bot"
+        assert mock_session.agent_version_id == version.id
+        assert mock_session.agent_version_number == 1
+        assert mock_session.metadata["agent_name"] == "legal-bot"
