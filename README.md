@@ -11,7 +11,7 @@
 
 **The stateful control plane for AI agents.** Track, secure, and optimize every agent run with absolute visibility and control — not just individual LLM calls.
 
-Works with multiple LLM SDKs (Anthropic, Gemini, OpenAI, Cohere, Mistral, LiteLLM, etc.) and agent CLIs like Claude Code and Gemini CLI.
+Works with multiple LLM SDKs (Anthropic, Gemini, OpenAI, Cohere, Mistral, LiteLLM, etc.) and agent CLIs like Claude Code, Gemini CLI, and [OpenClaw](OPENCLAW.md).
 
 ---
 
