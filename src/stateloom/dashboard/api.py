@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json as json_module
 import logging
+import os
 import queue
 import threading
 from collections.abc import AsyncIterator
@@ -353,12 +354,17 @@ def create_api_router(gate: Gate) -> APIRouter:
             checks["store"] = "error"
             ready = False
 
+        store_path: str | None = None
+        if hasattr(gate.store, "_path"):
+            store_path = os.path.abspath(gate.store._path)
+
         return {
             "status": "ok",
             "ready": ready,
             "version": "0.1.0",
             "api_version": "1",
             "checks": checks,
+            "store_path": store_path,
         }
 
     @router.get("/features")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import json
 import logging
 import threading
 import time
@@ -53,6 +54,23 @@ from stateloom.store.memory_store import MemoryStore
 from stateloom.store.sqlite_store import SQLiteStore
 
 logger = logging.getLogger("stateloom")
+
+
+def _discover_dashboard_store_path(host: str, port: int) -> str | None:
+    """Query a running dashboard for its store path.
+
+    Returns the absolute store path if a dashboard is reachable and using
+    SQLite, otherwise ``None``.
+    """
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/api/health", timeout=1) as resp:
+            data = json.loads(resp.read())
+            path: str | None = data.get("store_path")
+            return path
+    except Exception:
+        return None
 
 
 class Gate:
@@ -141,6 +159,13 @@ class Gate:
 
         # Set default budget
         self.session_manager.set_default_budget(config.budget_per_session)
+
+        # If using default SQLite path, check if a dashboard is already running
+        # and reuse its store path to avoid splitting data across CWDs.
+        if config.store_backend == "sqlite" and config.store_path == ".stateloom/data.db":
+            resolved = _discover_dashboard_store_path(config.dashboard_host, config.dashboard_port)
+            if resolved:
+                config.store_path = resolved
 
         # Initialize store
         if config.store_backend == "sqlite":
