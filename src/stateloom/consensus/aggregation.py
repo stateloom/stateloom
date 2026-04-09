@@ -100,8 +100,9 @@ async def judge_synthesis(
     # Build transcript
     transcript_parts: list[str] = []
     for resp in responses:
+        label = resp.persona_name if resp.persona_name else resp.model
         transcript_parts.append(
-            f"**{resp.model}** (Round {resp.round_number}, "
+            f"**{label}** (Round {resp.round_number}, "
             f"Confidence: {resp.confidence:.2f}):\n{resp.content}"
         )
     transcript = "\n\n---\n\n".join(transcript_parts)

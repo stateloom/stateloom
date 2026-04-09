@@ -9,6 +9,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 @dataclass
+class Persona:
+    """A named debater with its own model, system prompt, and visibility rules."""
+
+    name: str
+    model: str
+    system_prompt: str = ""
+    prompt: str = ""
+    sees: list[str] | None = None  # None = sees all others (default)
+
+
+@dataclass
 class ConsensusConfig:
     """Internal configuration passed from orchestrator to strategy."""
 
@@ -34,6 +45,7 @@ class ConsensusConfig:
     agent_slug: str = ""  # resolved agent slug
     agent_version_id: str = ""  # resolved version ID
     agent_version_number: int = 0  # resolved version number
+    personas: list[Persona] = field(default_factory=list)
 
 
 class DebaterResponse(BaseModel):
@@ -49,6 +61,7 @@ class DebaterResponse(BaseModel):
     tokens: int = Field(default=0, ge=0)
     session_id: str = ""
     round_number: int = Field(default=0, ge=0)
+    persona_name: str = ""
 
 
 class DebateRound(BaseModel):
@@ -82,3 +95,5 @@ class ConsensusResult(BaseModel):
     aggregation_method: str = ""
     winner_model: str = ""
     duration_ms: float = Field(default=0.0, ge=0)
+    personas: list[dict[str, str]] = Field(default_factory=list)
+    winner_persona: str = ""

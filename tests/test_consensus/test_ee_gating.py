@@ -146,7 +146,7 @@ class TestGateConsensusGating:
 
         with pytest.raises(StateLoomFeatureError) as exc_info:
             await Gate.consensus(gate, models=["a", "b", "c", "d"], prompt="test")
-        assert "4 models" in str(exc_info.value)
+        assert "4 debaters" in str(exc_info.value)
         assert exc_info.value.feature == "consensus_advanced"
 
     @pytest.mark.asyncio

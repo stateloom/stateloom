@@ -28,6 +28,7 @@ async def _sample_call(
     sample_index: int,
     temperature: float,
     durable: bool = True,
+    persona_name: str = "",
 ) -> DebaterResponse:
     """Make a single sample call."""
     from stateloom.chat import Client
@@ -61,6 +62,7 @@ async def _sample_call(
             tokens=tokens,
             session_id=session_id,
             round_number=1,
+            persona_name=persona_name,
         )
 
 
@@ -73,16 +75,25 @@ class SelfConsistencyStrategy:
         gate: Gate,
         parent_session: Session,
     ) -> ConsensusResult:
+        if config.personas and len(config.personas) > 1:
+            raise ValueError("self_consistency requires exactly 1 persona")
+
         start = time.monotonic()
-        model = config.models[0]
+        persona = config.personas[0] if config.personas else None
+        model = persona.model if persona else config.models[0]
+        persona_name = persona.name if persona else ""
         samples = config.samples
         temperature = config.temperature
 
         # Build messages
         messages = list(config.messages) if config.messages else []
-        if config.prompt and not messages:
+        if persona and persona.prompt:
+            messages = [{"role": "user", "content": persona.prompt}]
+        elif config.prompt and not messages:
             messages = [{"role": "user", "content": config.prompt}]
-        if config.agent_system_prompt:
+        if persona and persona.system_prompt:
+            system_prompt = persona.system_prompt + DEFAULT_CONFIDENCE_INSTRUCTION
+        elif config.agent_system_prompt:
             system_prompt = config.agent_system_prompt + DEFAULT_CONFIDENCE_INSTRUCTION
         else:
             system_prompt = VOTE_SYSTEM_PROMPT
@@ -99,6 +110,7 @@ class SelfConsistencyStrategy:
                 i,
                 temperature,
                 durable=config.ee_consensus,
+                persona_name=persona_name,
             )
             for i in range(samples)
         ]
@@ -125,6 +137,11 @@ class SelfConsistencyStrategy:
             duration_ms=elapsed_ms,
         )
 
+        # Build persona metadata
+        result_personas: list[dict[str, str]] = []
+        if persona:
+            result_personas = [{"name": persona.name, "model": persona.model}]
+
         return ConsensusResult(
             answer=answer,
             confidence=conf,
@@ -138,4 +155,6 @@ class SelfConsistencyStrategy:
             aggregation_method="majority_vote",
             winner_model=model,
             duration_ms=elapsed_ms,
+            personas=result_personas,
+            winner_persona=persona_name,
         )

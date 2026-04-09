@@ -31,18 +31,27 @@ async def _call_debater(
     budget: float | None,
     round_number: int,
     durable: bool = True,
+    persona_name: str = "",
 ) -> DebaterResponse:
     """Make a single debater call and return a DebaterResponse."""
     from stateloom.chat import Client
 
     start = time.monotonic()
-    session_id = f"{parent_session.id}-vote-{model}-r{round_number}"
+    if persona_name:
+        from stateloom.consensus.strategies.debate import _sanitize_session_id
+
+        slug = _sanitize_session_id(persona_name)
+        session_id = f"{parent_session.id}-vote-{slug}-r{round_number}"
+        client_name = f"vote-{slug}"
+    else:
+        session_id = f"{parent_session.id}-vote-{model}-r{round_number}"
+        client_name = f"vote-{model}"
     async with Client(
         session_id=session_id,
         parent=parent_session.id,
         budget=budget,
         durable=durable,
-        name=f"vote-{model}",
+        name=client_name,
     ) as client:
         result = await client.achat(model=model, messages=messages)
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -60,6 +69,7 @@ async def _call_debater(
             tokens=tokens,
             session_id=session_id,
             round_number=round_number,
+            persona_name=persona_name,
         )
 
 
@@ -74,34 +84,64 @@ class VoteStrategy:
     ) -> ConsensusResult:
         start = time.monotonic()
         models = config.models
+        use_personas = bool(config.personas)
 
-        # Build messages
+        # Build base messages
         messages = list(config.messages) if config.messages else []
         if config.prompt and not messages:
             messages = [{"role": "user", "content": config.prompt}]
 
-        # Prepend system prompt with confidence instruction
-        if config.agent_system_prompt:
-            system_prompt = config.agent_system_prompt + DEFAULT_CONFIDENCE_INSTRUCTION
+        if use_personas:
+            debater_count = len(config.personas)
+            per_model_budget = config.budget / debater_count if config.budget else None
+            tasks = []
+            for p in config.personas:
+                sys_prompt = (
+                    p.system_prompt + DEFAULT_CONFIDENCE_INSTRUCTION
+                    if p.system_prompt
+                    else VOTE_SYSTEM_PROMPT
+                )
+                persona_msgs: list[dict[str, Any]] = [
+                    {"role": "system", "content": sys_prompt},
+                ]
+                if p.prompt:
+                    persona_msgs.append({"role": "user", "content": p.prompt})
+                elif messages:
+                    persona_msgs.extend(messages)
+                tasks.append(
+                    _call_debater(
+                        p.model,
+                        persona_msgs,
+                        parent_session,
+                        per_model_budget,
+                        1,
+                        durable=config.ee_consensus,
+                        persona_name=p.name,
+                    )
+                )
         else:
-            system_prompt = VOTE_SYSTEM_PROMPT
-        vote_messages = [{"role": "system", "content": system_prompt}] + messages
+            # Prepend system prompt with confidence instruction
+            if config.agent_system_prompt:
+                system_prompt = config.agent_system_prompt + DEFAULT_CONFIDENCE_INSTRUCTION
+            else:
+                system_prompt = VOTE_SYSTEM_PROMPT
+            vote_messages = [{"role": "system", "content": system_prompt}] + messages
 
-        # Calculate per-model budget
-        per_model_budget = config.budget / len(models) if config.budget else None
+            # Calculate per-model budget
+            per_model_budget = config.budget / len(models) if config.budget else None
 
-        # All models vote in parallel
-        tasks = [
-            _call_debater(
-                m,
-                vote_messages,
-                parent_session,
-                per_model_budget,
-                1,
-                durable=config.ee_consensus,
-            )
-            for m in models
-        ]
+            # All models vote in parallel
+            tasks = [
+                _call_debater(
+                    m,
+                    vote_messages,
+                    parent_session,
+                    per_model_budget,
+                    1,
+                    durable=config.ee_consensus,
+                )
+                for m in models
+            ]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Filter out exceptions
@@ -132,6 +172,14 @@ class VoteStrategy:
 
         winner = max(valid_responses, key=lambda r: r.confidence) if valid_responses else None
 
+        # Build persona metadata
+        result_personas: list[dict[str, str]] = []
+        winner_persona = ""
+        if use_personas:
+            result_personas = [{"name": p.name, "model": p.model} for p in config.personas]
+            if winner and winner.persona_name:
+                winner_persona = winner.persona_name
+
         return ConsensusResult(
             answer=answer,
             confidence=conf,
@@ -145,4 +193,6 @@ class VoteStrategy:
             aggregation_method=config.aggregation,
             winner_model=winner.model if winner else "",
             duration_ms=elapsed_ms,
+            personas=result_personas,
+            winner_persona=winner_persona,
         )

@@ -3231,6 +3231,8 @@ def create_api_router(gate: Gate) -> APIRouter:
                     "aggregation_method": getattr(e, "aggregation_method", ""),
                     "winner_model": getattr(e, "winner_model", ""),
                     "final_answer_preview": getattr(e, "final_answer_preview", ""),
+                    "personas": getattr(e, "personas", []),
+                    "winner_persona": getattr(e, "winner_persona", ""),
                     "timestamp": e.timestamp.isoformat(),
                 }
             )
@@ -3266,6 +3268,7 @@ def create_api_router(gate: Gate) -> APIRouter:
                     "consensus_reached": getattr(re, "consensus_reached", False),
                     "round_cost": round(getattr(re, "round_cost", 0.0), 6),
                     "round_duration_ms": round(getattr(re, "round_duration_ms", 0.0), 1),
+                    "persona_names": getattr(re, "persona_names", []),
                     "timestamp": re.timestamp.isoformat(),
                 }
             )
@@ -3287,6 +3290,8 @@ def create_api_router(gate: Gate) -> APIRouter:
                 "aggregation_method": getattr(ce, "aggregation_method", ""),
                 "winner_model": getattr(ce, "winner_model", ""),
                 "final_answer_preview": getattr(ce, "final_answer_preview", ""),
+                "personas": getattr(ce, "personas", []),
+                "winner_persona": getattr(ce, "winner_persona", ""),
             },
             "rounds": rounds,
             "children": [_session_to_dict(gate, c) for c in children],

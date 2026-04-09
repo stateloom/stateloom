@@ -18,7 +18,7 @@ from typing import Any, cast
 from stateloom._version import __version__
 from stateloom.agent.models import Agent, AgentVersion
 from stateloom.chat import ChatResponse, Client, achat, chat
-from stateloom.consensus.models import ConsensusResult, DebateRound
+from stateloom.consensus.models import ConsensusResult, DebateRound, Persona
 from stateloom.core.config import ComplianceProfile, KillSwitchRule, PIIRule, StateLoomConfig
 from stateloom.core.errors import (
     StateLoomAuthError,
@@ -1476,6 +1476,7 @@ async def consensus(
     early_stop_threshold: float = 0.9,
     greedy_agreement_threshold: float = 0.7,
     agent: str | None = None,
+    personas: list[dict[str, Any]] | None = None,
     **kwargs: Any,
 ) -> Any:
     """Run a multi-agent consensus session.
@@ -1500,6 +1501,8 @@ async def consensus(
         early_stop_threshold: Confidence threshold for early stop.
         greedy_agreement_threshold: Agreement threshold for greedy downgrade.
         agent: Agent slug or ID — uses the agent's system prompt for debaters.
+        personas: List of persona dicts, each with name, model, system_prompt,
+            prompt, and optional sees list. Overrides models/prompt when set.
 
     Returns:
         A ``ConsensusResult`` with answer, confidence, cost, and rounds.
@@ -1522,6 +1525,7 @@ async def consensus(
         early_stop_threshold=early_stop_threshold,
         greedy_agreement_threshold=greedy_agreement_threshold,
         agent=agent,
+        personas=personas,
         **kwargs,
     )
 
@@ -1536,6 +1540,7 @@ def consensus_sync(
     session_id: str | None = None,
     greedy: bool = False,
     agent: str | None = None,
+    personas: list[dict[str, Any]] | None = None,
     **kwargs: Any,
 ) -> Any:
     """Synchronous wrapper for ``consensus()``.
@@ -1558,6 +1563,7 @@ def consensus_sync(
         session_id=session_id,
         greedy=greedy,
         agent=agent,
+        personas=personas,
         **kwargs,
     )
 
@@ -2083,6 +2089,7 @@ __all__ = [
     "delete_local_model",
     "DebateRound",
     "durable_task",
+    "Persona",
     "experiment_metrics",
     "export_session",
     "feature_status",

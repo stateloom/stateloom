@@ -64,6 +64,7 @@ class ConsensusOrchestrator:
                         models=config.models,
                         total_rounds=0,
                         duration_ms=(time.monotonic() - start) * 1000,
+                        personas=[{"name": p.name, "model": p.model} for p in config.personas],
                     )
                 else:
                     raise
@@ -85,6 +86,7 @@ class ConsensusOrchestrator:
                                 "confidence": r.confidence,
                                 "cost": r.cost,
                                 "content_preview": r.content[:200],
+                                **({"persona_name": r.persona_name} if r.persona_name else {}),
                             }
                             for r in rnd.responses
                         ],
@@ -92,6 +94,7 @@ class ConsensusOrchestrator:
                         consensus_reached=rnd.consensus_reached,
                         round_cost=rnd.cost,
                         round_duration_ms=rnd.duration_ms,
+                        persona_names=[r.persona_name for r in rnd.responses if r.persona_name],
                     )
                     gate.store.save_event(round_event)
                 except Exception:
@@ -111,6 +114,8 @@ class ConsensusOrchestrator:
                     early_stopped=result.early_stopped,
                     aggregation_method=result.aggregation_method,
                     winner_model=result.winner_model,
+                    personas=result.personas,
+                    winner_persona=result.winner_persona,
                 )
                 gate.store.save_event(consensus_event)
             except Exception:

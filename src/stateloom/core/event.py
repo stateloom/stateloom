@@ -315,6 +315,7 @@ class DebateRoundEvent(Event):
     consensus_reached: bool = False
     round_cost: float = Field(default=0.0, ge=0)
     round_duration_ms: float = Field(default=0.0, ge=0)
+    persona_names: list[str] = Field(default_factory=list)
 
 
 class ConsensusEvent(Event):
@@ -331,6 +332,8 @@ class ConsensusEvent(Event):
     early_stopped: bool = False
     aggregation_method: str = ""
     winner_model: str = ""
+    personas: list[dict[str, str]] = Field(default_factory=list)
+    winner_persona: str = ""
 
 
 class SessionLifecycleEvent(Event):

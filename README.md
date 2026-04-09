@@ -9,7 +9,7 @@
   <a href="https://stateloom.dev"><img src="https://img.shields.io/badge/website-stateloom.dev-6366f1" alt="Website"></a>
 </p>
 
-**The stateful control plane for AI agents.** Track, secure, and optimize every agent run with absolute visibility and control — not just individual LLM calls.
+**The stateful control plane for AI agents.** Crash on step 47, resume from step 46. Budget the whole run at $2. Kill rogue agents instantly. All local, no SaaS, no framework lock-in.
 
 Works with multiple LLM SDKs (Anthropic, Gemini, OpenAI, Cohere, Mistral, LiteLLM, etc.) and agent CLIs like Claude Code, Gemini CLI, and [OpenClaw](OPENCLAW.md).
 
@@ -17,24 +17,23 @@ Works with multiple LLM SDKs (Anthropic, Gemini, OpenAI, Cohere, Mistral, LiteLL
 
 ## Why StateLoom?
 
-Standard AI gateways operate at the **LLM call level** — they see each API request in isolation. But modern AI agents run in loops, have specific sessions for individual tasks, make 50+ background calls, frequently crash, and what not.
+StateLoom is **session-aware**. Instead of seeing each API request in isolation, it sits in the request path and groups fragmented multi-step workflows into meaningful, stateful sessions. This lets you resume crashed scripts without re-paying for completed steps, enforce budgets across an entire agent run (not just a single call), contain blast radius when things go wrong, and get full visibility into what your models are actually doing.
 
-StateLoom is **session-aware** and built explicitly for agents. We group fragmented workflows into meaningful, stateful sessions. This allows you to resume crashed scripts without paying to repeat previously successful steps, enforce strict budgets across entire workflows, contain the blast radius of rogue agents, and gain absolute transparency into what your models are doing behind the scenes.
-
-Most importantly, StateLoom is designed for absolute data sovereignty. Because it runs locally on your laptop or directly inside your enterprise network (VPC), it functions as an isolated, zero-trust control plane ensuring your data never passes through a third-party SaaS proxy.
+It runs locally on your laptop or inside your VPC. Prompts never leave your network.
 
 ---
 
 ## Table of Contents
 
 - [Why StateLoom?](#why-stateloom)
-- [Install](#install)
 - [Quick Start](#quick-start)
 - [Providers](#providers)
-- [For Individual Developers](#for-individual-developers-free--open-source)
-- [For Teams & Enterprise](#for-teams--enterprise)
+- [Core Features](#core-features)
+- [Advanced Features](#advanced-features)
+- [More Features](#more-features)
 - [Key Examples](#key-examples)
 - [Dashboard](#dashboard)
+- [For Teams & Enterprise](#for-teams--enterprise)
 - [Extras](#extras)
 - [Configuration](#configuration)
 - [Error Handling](#error-handling)
@@ -44,34 +43,56 @@ Most importantly, StateLoom is designed for absolute data sovereignty. Because i
 
 ---
 
-## Install
-
-```bash
-pip install stateloom
-```
-
-**Requirements:** Python 3.10+ (tested on 3.10, 3.11, 3.12, 3.13). See [extras](#extras) for optional dependencies.
-
 ## Quick Start
+
+### For CLI users (zero code changes)
 
 ```bash
 pip install stateloom
 stateloom start
 # Dashboard is live at http://localhost:4782
 ```
-Or use it in your code, wrap your regular calls within stateloom session or use
-stateloom.chat(model="gemini-2.5-flash", messages=[...]) directly.
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:4782
+claude "explain this codebase"
+# → Dashboard at localhost:4782 shows cost, tokens, PII, session timeline
+```
+
+Also works with Gemini CLI and Codex:
+
+```bash
+export CODE_ASSIST_ENDPOINT=http://localhost:4782/code-assist
+gemini "refactor the auth module"
+```
+
+```bash
+export OPENAI_BASE_URL=http://localhost:4782/v1
+codex "add unit tests for the auth module"
+```
+
+You already pay for Claude Pro or Gemini Ultra. Use your existing subscription through StateLoom — get cost tracking, PII scanning, budget enforcement, guardrails, and a session timeline for every agent run. No API key needed, no code changes. All CLIs connect to the same StateLoom instance.
+
+### For SDK users
+
+```bash
+pip install stateloom
+```
+
 ```python
 stateloom.init()
 claude = anthropic.Anthropic()
 
 with stateloom.session("customer-report", budget=2.0, durable=True) as s:
+    # Crashes on Step 3? Restart skips Steps 1 & 2 from cache.
     research = claude.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=1024,
         messages=[{"role": "user", "content": "Key trends in AI governance 2025"}],
     )
 ```
+
+**Requirements:** Python 3.10+ (tested on 3.10, 3.11, 3.12, 3.13). See [extras](#extras) for optional dependencies.
 
 ## Providers
 
@@ -87,91 +108,11 @@ Auto-detects and patches installed LLM clients:
 | LiteLLM | `litellm` | Yes | `stream=True` |
 | Ollama (local) | — | Via `local_model=` | — |
 
-## For Individual Developers (Free & Open Source)
+## Core Features
 
-StateLoom gives solo developers and startups everything needed to build resilient agents locally, for free. Here is what you can get out of using stateloom SDK.
+### Durable Resumption
 
-**Agent Cost Control**
-- **Session-scoped cost tracking** — cost per agent run, not just per API call
-- **Per-model cost breakdown** — track cost and tokens per model within multi-model sessions
-- **Budget enforcement** — hard stop or warn when an agent run exceeds its spend limit
-
-**Agent Safety**
-- **PII detection** — detect emails, credit cards, SSNs, API keys (audit/redact/block modes)
-- **Guardrails** — prompt injection detection (32 heuristic patterns + NLI classifier + Llama-Guard), jailbreak prevention, system prompt leak protection
-- **Zero-trust security engine** — CPython audit hooks (PEP 578) to intercept dangerous operations + in-memory secret vault
-
-**Performance & Caching**
-- **Exact-match & semantic caching** — deduplication plus embedding-based similarity matching
-- **Loop detection** — catch agents spinning on the same query
-- **Session timeouts & cancellation** — max duration, idle timeout, and programmatic cancellation
-
-**Local Models & Smart Routing**
-- **Local model support** — run Ollama models locally with hardware-aware recommendations
-- **Intelligent auto-routing** — route simple requests to local models based on complexity scoring
-- **Model testing** — test candidates against your production model with automated quality scoring and migration readiness reports
-
-**Agent Reliability**
-- **Durable resumption** — Temporal-like checkpointing: agent crashes mid-run, restart, resume from cache
-- **Semantic retries** — automatic retries for LLM output failures (bad JSON, hallucinated tool calls)
-- **Time-travel debugging** — replay a failed agent run from any step with network safety
-- **VCR-cassette mock** — record LLM calls once, replay forever for zero-cost testing
-- **Named checkpoints** — mark milestones within a session for the dashboard waterfall timeline
-
-**Multi-Model & Experimentation**
-- **Multi-agent consensus** — vote, debate, and self-consistency strategies with up to 3 models
-- **A/B experiments** — test model variants with built-in assignment, metrics, and backtesting
-- **File-based prompt versioning** — drop `.md`/`.yaml`/`.txt` files in a folder; auto-detect changes as new versions
-
-**Developer Experience**
-- **Unified chat API** — provider-agnostic `stateloom.chat()` without importing any SDK
-- **Session export/import** — portable JSON bundles for sharing, archiving, and migration
-- **LangChain / LangGraph integration** — callback handlers for popular agent frameworks
-- **Local dashboard & REST API** — live session viewer, security controls, observability charts at `localhost:4782`
-
-**Agent CLI Integration**
-
-You already pay for Claude Pro or Gemini Ultra. Use your existing subscription through StateLoom — get cost tracking, PII scanning, budget enforcement, guardrails, and a session timeline for every agent run. No API key needed, no code changes.
-
-```bash
-stateloom start
-```
-
-```bash
-export ANTHROPIC_BASE_URL=http://localhost:4782
-claude "explain this codebase"
-# All calls appear as one session in the dashboard
-```
-
-```bash
-export CODE_ASSIST_ENDPOINT=http://localhost:4782/code-assist
-gemini "refactor the auth module"
-```
-
-```bash
-export OPENAI_BASE_URL=http://localhost:4782/v1
-codex "add unit tests for the auth module"
-```
-
-All CLIs connect to the same StateLoom instance. Subscription users (Claude Max, Gemini Ultra, ChatGPT Pro) work transparently — OAuth tokens pass through to the upstream provider.
-
-## For Teams & Enterprise
-
-**StateLoom Enterprise Edition (EE)** provides a single, centralized control plane to govern, secure, and optimize your entire AI workforce. We give engineering and finance teams absolute visibility into **hierarchical org and team-level token billing**, paired with centralized **Virtual Key management** and strict **budget enforcements** to automate chargebacks and prevent runaway costs. Accelerate your AI roadmap by empowering teams to **spin up agents in secure, isolated sandboxes** within your own private ecosystem, safely run live **A/B experiments**, validate cheaper models via risk-free **dark launching**, orchestrate high-assurance **multi-agent consensus**, and auto-generate proprietary training datasets through our **distillation flywheel**. Simultaneously, we provide your CISO with a unified zero-trust security perimeter: an in-memory **Secret Vault**, real-time **prompt guardrails**, declarative **compliance profiles**, dynamic **force re-routing**, and a **global kill switch** to instantly contain the blast radius of rogue agents. There is so much more you get. And the idea behind all of it is for you to keep the full control of the agents while allowing you to scale seamlessly.
-
-👉 **[Book an Enterprise Demo Today](mailto:aishvarya@stateloom.dev)**
-
-
-## Key Examples
-
-![StateLoom Dashboard](assets/homescreen.png)
-
-[![Claude CLI through StateLoom](https://img.youtube.com/vi/ZGct2D3Bwb4/maxresdefault.jpg)](https://www.youtube.com/watch?v=ZGct2D3Bwb4)
-
-![Gemini CLI session in StateLoom dashboard](assets/gemini_cli.png)
-
-
-### Multi-Provider Session
+Temporal-like checkpointing for LLM workflows. When an agent crashes mid-run, restart the same session and it resumes from cache — completed steps replay instantly, only new steps execute live. Works across providers, supports streaming, and handles tool calls. No framework lock-in required.
 
 ```python
 import stateloom
@@ -210,137 +151,71 @@ with stateloom.session("customer-report", budget=2.0, durable=True) as s:
 # Budget enforcement stops the whole run if it exceeds $2.
 ```
 
-### PII Detection
+### Session-Scoped Budgets
+
+Hard stop or warn when an agent run exceeds its spend limit — not per-call rate limiting, but per-session enforcement across an entire multi-provider workflow. Budget tracking works with both API keys and subscriptions.
 
 ```python
-from stateloom import PIIRule
-
-stateloom.init(
-    pii=True,
-    pii_rules=[
-        PIIRule(pattern="credit_card", mode="block"),
-        PIIRule(pattern="email", mode="redact"),
-    ],
-)
-```
-
-![PII blocked — SSN detected in Claude CLI tool-use flow](assets/ssn_block.png)
-
-### Guardrails
-
-```python
-stateloom.init(
-    guardrails_enabled=True,
-    guardrails_mode="enforce",             # "audit" or "enforce"
-    guardrails_nli_enabled=True,           # NLI classifier (~5-20ms, optional)
-    guardrails_local_model_enabled=True,   # Llama-Guard via Ollama
-)
-
-# Runtime toggle (no restart needed)
-stateloom.configure_guardrails(nli_enabled=True, nli_threshold=0.8)
-```
-
-![Guardrail detecting prompt injection — 3 heuristic matches logged](assets/guardrail.png)
-
-### Kill Switch
-
-```python
-stateloom.kill_switch(active=True, message="Maintenance in progress")
-stateloom.add_kill_switch_rule(model="gpt-4*", reason="Cost overrun")
-```
-
-### Zero-Trust Security
-
-```python
-stateloom.init(
-    security_audit_hooks_enabled=True,   # CPython audit hooks (PEP 578)
-    security_audit_hooks_mode="enforce", # "audit" (log) or "enforce" (block)
-    security_audit_hooks_deny_events=["subprocess.Popen", "os.system"],
-    security_secret_vault_enabled=True,  # Move API keys to protected vault
-    security_secret_vault_scrub_environ=True,  # Scrub from os.environ
-)
-
-# Check status
-status = stateloom.security_status()
-
-# Store/retrieve secrets programmatically
-stateloom.vault_store("CUSTOM_SECRET", "value")
-secret = stateloom.vault_retrieve("CUSTOM_SECRET")
-```
-
-### Local Models & Auto-Routing
-
-```python
-stateloom.init(local_model="llama3.2:3b", auto_route=True, default_model="gemini-2.5-flash")
-
-# No explicit model — auto-router decides local vs cloud based on complexity
-simple = stateloom.chat(messages=[{"role": "user", "content": "What is 2 + 2?"}])       # → local
-hard = stateloom.chat(messages=[{"role": "user", "content": "Design a consensus algorithm"}])  # → cloud
-```
-
-### Model Testing
-
-```python
-stateloom.init(
-    shadow=True,
-    shadow_model="claude-haiku-4-5-20251001",  # Cloud-to-cloud candidate
-    # shadow_model="llama3.2:8b",              # Or local model via Ollama
-    shadow_sample_rate=0.5,                     # Test 50% of traffic
-)
-# Dashboard: localhost:4782 → Model Testing → see similarity scores
+with stateloom.session("analysis", budget=2.0) as s:
+    # StateLoom hard-stops this session if cumulative cost exceeds $2
+    ...
 ```
 
 ![Budget exceeded — session hard-stopped after $0.001 limit crossed](assets/session_budget.png)
 
-### Durable Resumption
+### Agent CLI Integration
 
-```python
-with stateloom.session(session_id="task-123", durable=True) as s:
-    res1 = client.chat.completions.create(...)  # Cache hit on restart
-    res2 = client.chat.completions.create(...)  # Resumes here
-```
+Claude Code, Gemini CLI, and Codex through StateLoom. Zero code changes — just set an environment variable and every CLI call flows through StateLoom's middleware pipeline. Works with subscriptions (Claude Max, Gemini Ultra, ChatGPT Pro) — OAuth tokens pass through to the upstream provider.
 
-### Multi-Agent Consensus
+### Cross-Provider Cost Tracking
 
-```python
-result = await stateloom.consensus(
-    prompt="What are the key risks of deploying LLMs in healthcare?",
-    models=["gpt-4o", "claude-sonnet-4-20250514", "gemini-2.5-flash"],
-    strategy="debate",   # or "vote", "self_consistency"
-    rounds=3,
-    budget=1.00,
-)
-print(result.answer)       # Final synthesized answer
-print(result.confidence)   # 0.0-1.0 confidence score
-print(result.cost)         # Total cost across all models
+One session spanning Claude + Gemini + GPT, with per-model cost breakdown. Every call within a session is tracked regardless of provider, giving you total cost, token counts, and per-model attribution in one place.
 
-# Agent-guided consensus — all debaters use the agent's system prompt
-result = await stateloom.consensus(
-    agent="medical-advisor",
-    prompt="Should we use AI for radiology screening?",
-    models=["gpt-4o", "claude-sonnet-4-20250514"],
-    strategy="debate",
-)
-```
+### Local-First, Zero-Trust
 
-### Managed Agents
+Runs on localhost or in your VPC. Prompts never leave your network. CPython audit hooks (PEP 578) intercept dangerous operations at the interpreter level. An in-memory secret vault scrubs API keys from `os.environ` so agent code can't exfiltrate credentials.
 
-```python
-agent = stateloom.create_agent(
-    slug="legal-bot", team_id="team-1",
-    model="gpt-4o",
-    system_prompt="You are a legal assistant.",
-)
-# Call via: POST /v1/agents/legal-bot/chat/completions
-```
+## Advanced Features
 
-### Unified Chat API
+Each feature below is fully shipped. See the [full feature reference](docs/reference.md) for configuration details and examples.
 
-```python
-stateloom.init(default_model="gpt-4o")
-response = stateloom.chat(messages=[{"role": "user", "content": "What is the capital of France?"}])
-print(response.content)  # "The capital of France is Paris."
-```
+- **PII Detection** — detect emails, credit cards, SSNs, API keys in audit, redact, or block modes. Optional NER via GLiNER for zero-shot entity recognition.
+- **Guardrails** — prompt injection detection (32 heuristic patterns + NLI classifier + Llama-Guard), jailbreak prevention, system prompt leak protection. Audit or enforce modes.
+- **Secret Vault** — in-memory secret storage with `os.environ` scrubbing. CPython audit hooks block `subprocess.Popen`, `os.system`, and other exfiltration vectors.
+- **Exact-Match & Semantic Caching** — deduplication plus embedding-based similarity matching (sentence-transformers + FAISS). Error responses are excluded from cache.
+- **Kill Switch & Blast Radius** — global or granular emergency stop (by model, provider, environment, agent). Auto-pause on repeated failures per session or per agent identity.
+- **Auto-Routing** — route simple requests to local Ollama models based on semantic complexity scoring. Realtime data guard, inadequate response reroute, historical learning across restarts.
+- **Model Testing** — shadow traffic comparison with automated quality scoring, migration readiness reports, and similarity analysis. Fire-and-forget candidate calls.
+- **Semantic Retries** — automatic retries for bad JSON, hallucinated tool calls, and other LLM output failures. Combine with durable sessions for retry loops that don't re-pay for completed steps.
+- **Circuit Breaker** — per-provider failover with tier-based model alternatives and health probes for recovery detection.
+- **Time-Travel Debugging** — replay a failed agent run from any step with network safety (outbound HTTP blocked during replay).
+- **VCR-Cassette Mock** — record LLM calls once, replay forever for zero-cost testing. Network blocking prevents accidental live calls.
+- **Loop Detection** — catch agents spinning on the same query.
+- **Session Timeouts & Cancellation** — max duration, idle timeout, programmatic cancellation, and suspension with signal/wait for human-in-the-loop.
+- **Named Checkpoints** — mark milestones within a session for the dashboard waterfall timeline.
+
+## More Features
+
+- **Multi-agent consensus** — vote, debate, and self-consistency strategies with persona-driven debaters. Budget-constrained multi-round debate with model downgrade.
+- **A/B experiments** — test model variants with built-in assignment, metrics, and backtesting.
+- **File-based prompt versioning** — drop `.md`/`.yaml`/`.txt` files in a folder; auto-detect changes as new versions with content hash deduplication.
+- **Managed agents** — create versioned agents with system prompts, call via REST API. Slug-based routing, immutable versions, rollback support.
+- **Unified chat API** — provider-agnostic `stateloom.chat()` without importing any SDK. Routes by model name prefix.
+- **LangChain / LangGraph integration** — callback handlers for popular agent frameworks.
+- **Session export/import** — portable JSON bundles for sharing, archiving, and migration with optional PII scrubbing.
+- **Compliance profiles** — declarative GDPR/HIPAA/CCPA enforcement with tamper-proof SHA-256 audit trails and Right to Be Forgotten purge engine.
+
+## Key Examples
+
+![StateLoom Dashboard](assets/homescreen.png)
+
+[![Claude CLI through StateLoom](https://img.youtube.com/vi/ZGct2D3Bwb4/maxresdefault.jpg)](https://www.youtube.com/watch?v=ZGct2D3Bwb4)
+
+![Gemini CLI session in StateLoom dashboard](assets/gemini_cli.png)
+
+![PII blocked — SSN detected in Claude CLI tool-use flow](assets/ssn_block.png)
+
+![Guardrail detecting prompt injection — 3 heuristic matches logged](assets/guardrail.png)
 
 ## Dashboard
 
@@ -354,17 +229,21 @@ Starts automatically at `localhost:4782`. Live session viewer, REST API, and Web
 
 ![Session timeout — auto-terminated after 8s limit](assets/timeout.png)
 
-- **Overview** — total cost, active sessions, cloud/local calls, PII detections, guardrail detections, cache hits
-- **Sessions** — list, detail with waterfall trace timeline, cost/token breakdown, child sessions
-- **Experiments** — A/B test management, metrics, leaderboard
-- **Consensus** — debate runs, round-by-round breakdown, per-model responses, confidence scores
-- **Model Testing** — candidate model evaluation, readiness scores, quality distribution, filtering funnel, migration recommendations
-- **Safety** — kill switch rules, blast radius status
-- **Security** — audit hooks, secret vault, event log, guardrails (config, detection stats, violation history)
-- **Compliance** — GDPR/HIPAA/CCPA profiles, audit trail
-- **Observability** — request rate, latency percentiles, cost breakdown charts
+The dashboard includes session waterfalls, cost breakdowns, experiment management, consensus runs, model testing, safety controls, security logs, compliance audit trails, and observability charts. See the [full dashboard guide](docs/reference.md#dashboard) for details.
 
-See [full API endpoint reference](docs/reference.md#dashboard) for all REST endpoints.
+## For Teams & Enterprise
+
+**StateLoom Enterprise Edition (EE)** provides a centralized control plane to govern, secure, and optimize your entire AI workforce:
+
+- **Hierarchical billing** — org and team-level token billing with cost attribution and automated chargebacks
+- **Virtual Key management** — scoped permissions per model, per agent, with rate limiting per key
+- **SSO/OIDC with RBAC** — five roles (org admin, auditor, team admin, editor, viewer) with PKCE and JIT provisioning
+- **Centralized kill switch & blast radius** — global or granular emergency controls across all teams
+- **Advanced consensus** — >3 models, judge synthesis, greedy model downgrade, durable replay
+- **A/B experiments with backtesting** — replay historical sessions with new model variants
+- **Compliance profiles** — GDPR/HIPAA/CCPA with tamper-proof audit trails and Right to Be Forgotten
+
+👉 **[Book an Enterprise Demo Today](mailto:aishvarya@stateloom.dev)**
 
 ## Extras
 

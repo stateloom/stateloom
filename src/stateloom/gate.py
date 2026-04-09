@@ -2218,7 +2218,7 @@ class Gate:
             A ``ConsensusResult`` with the synthesized answer, confidence,
             cost, and round-by-round details.
         """
-        from stateloom.consensus.models import ConsensusConfig
+        from stateloom.consensus.models import ConsensusConfig, Persona
         from stateloom.consensus.orchestrator import ConsensusOrchestrator
 
         if self._consensus_orchestrator is None:
@@ -2246,9 +2246,49 @@ class Gate:
             agent_version_number = version.version_number
             agent_model = version.model
 
+        # ── Persona validation and conversion ──
+        raw_personas = kwargs.get("personas")
+        personas: list[Persona] = []
+        if raw_personas is not None:
+            if not raw_personas:
+                raise ValueError("personas list must not be empty")
+            seen_names: set[str] = set()
+            for pd in raw_personas:
+                name = (pd.get("name") or "").strip()
+                model = (pd.get("model") or "").strip()
+                if not name:
+                    raise ValueError("Each persona must have a non-empty 'name'")
+                if not model:
+                    raise ValueError(f"Persona '{name}' must have a non-empty 'model'")
+                if name in seen_names:
+                    raise ValueError(f"Duplicate persona name: '{name}'")
+                seen_names.add(name)
+            # Validate sees references
+            for pd in raw_personas:
+                sees = pd.get("sees")
+                if sees is not None:
+                    pname = pd["name"].strip()
+                    for ref in sees:
+                        if ref == pname:
+                            raise ValueError(f"Persona '{pname}' cannot list itself in 'sees'")
+                        if ref not in seen_names:
+                            raise ValueError(f"Persona '{pname}' sees unknown persona '{ref}'")
+            personas = [
+                Persona(
+                    name=pd["name"].strip(),
+                    model=pd["model"].strip(),
+                    system_prompt=pd.get("system_prompt", ""),
+                    prompt=pd.get("prompt", ""),
+                    sees=pd.get("sees"),
+                )
+                for pd in raw_personas
+            ]
+
         # Use agent model as default when models not explicitly provided
         explicit_models = kwargs.get("models")
-        if not explicit_models and agent_model:
+        if personas:
+            resolved_models = list(dict.fromkeys(p.model for p in personas))
+        elif not explicit_models and agent_model:
             resolved_models = [agent_model]
         else:
             resolved_models = explicit_models or defaults.default_models
@@ -2277,6 +2317,7 @@ class Gate:
             agent_slug=agent_slug,
             agent_version_id=agent_version_id,
             agent_version_number=agent_version_number,
+            personas=personas,
         )
 
         # EE gating — check consensus_advanced availability
@@ -2287,11 +2328,12 @@ class Gate:
             ee_hint = (
                 "Set STATELOOM_LICENSE_KEY or use STATELOOM_ENV=development for local development."
             )
-            if len(config.models) > 3:
+            debater_count = len(config.personas) if config.personas else len(config.models)
+            if debater_count > 3:
                 raise StateLoomFeatureError(
                     "consensus_advanced",
-                    f"Consensus with {len(config.models)} models requires Enterprise. "
-                    f"Core supports up to 3 models. {ee_hint}",
+                    f"Consensus with {debater_count} debaters requires Enterprise. "
+                    f"Core supports up to 3 debaters. {ee_hint}",
                 )
             if config.greedy:
                 raise StateLoomFeatureError(
