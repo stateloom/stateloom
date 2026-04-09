@@ -19,6 +19,7 @@ from stateloom.core.errors import (
     StateLoomBudgetError,
     StateLoomCancellationError,
     StateLoomComplianceError,
+    StateLoomDurableReplayError,
     StateLoomGuardrailError,
     StateLoomKillSwitchError,
     StateLoomPIIBlockedError,
@@ -45,6 +46,7 @@ _NON_RETRYABLE = (
     StateLoomComplianceError,
     StateLoomSuspendedError,
     StateLoomGuardrailError,
+    StateLoomDurableReplayError,
 )
 
 

@@ -340,6 +340,7 @@ class Pipeline:
             firing ``ctx._on_stream_complete`` callbacks afterward.
         """
         self._check_request_size(request_kwargs)
+        request_hash = self._hash_request(request_kwargs) if session.durable else ""
         ctx = MiddlewareContext(
             session=session,
             config=config,
@@ -347,7 +348,7 @@ class Pipeline:
             method=method,
             model=model,
             request_kwargs=request_kwargs,
-            request_hash="",  # cache skips streaming; avoid JSON serialize + SHA-256
+            request_hash=request_hash,
             is_streaming=True,
             auto_route_eligible=auto_route_eligible,
             provider_base_url=provider_base_url,
@@ -400,6 +401,7 @@ class Pipeline:
             The ``MiddlewareContext`` with pre-call middleware applied.
         """
         self._check_request_size(request_kwargs)
+        request_hash = self._hash_request(request_kwargs) if session.durable else ""
         ctx = MiddlewareContext(
             session=session,
             config=config,
@@ -407,7 +409,7 @@ class Pipeline:
             method=method,
             model=model,
             request_kwargs=request_kwargs,
-            request_hash="",  # cache skips streaming; avoid JSON serialize + SHA-256
+            request_hash=request_hash,
             is_streaming=True,
             auto_route_eligible=auto_route_eligible,
             provider_base_url=provider_base_url,

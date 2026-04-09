@@ -96,6 +96,24 @@ class StateLoomReplayError(StateLoomError):
         super().__init__(message, details=f"Session: {session_id}")
 
 
+class StateLoomDurableReplayError(StateLoomReplayError):
+    """Request hash changed between runs — iteration order is non-deterministic."""
+
+    help_url = f"{DOCS_BASE}/durable-replay-mismatch"
+    error_code = "DURABLE_REPLAY_MISMATCH"
+
+    def __init__(self, session_id: str, step: int, expected_hash: str, actual_hash: str):
+        self.step = step
+        self.expected_hash = expected_hash
+        self.actual_hash = actual_hash
+        super().__init__(
+            f"Durable replay mismatch at step {step}: request hash changed "
+            f"(cached={expected_hash[:8]}…, current={actual_hash[:8]}…). "
+            f"LLM call order is non-deterministic between runs.",
+            session_id=session_id,
+        )
+
+
 class StateLoomKillSwitchError(StateLoomError):
     """Raised when the global kill switch is active — all LLM traffic blocked."""
 

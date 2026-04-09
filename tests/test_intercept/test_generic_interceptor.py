@@ -48,9 +48,11 @@ def _clean_state():
 def _make_gate(fail_open: bool = True) -> MagicMock:
     gate = MagicMock()
     gate.config.fail_open = fail_open
+    gate.config.durable_stream_buffer = False
     gate.pricing.calculate_cost.return_value = 0.001
     session = MagicMock()
     session.id = "test-session"
+    session.durable = False
     session.next_step.return_value = 1
     gate.get_or_create_session.return_value = session
     return gate

@@ -56,14 +56,31 @@ def _inject_api_key_if_needed(gate: Gate, adapter: ProviderAdapter, instance: An
             pass
 
 
-def _check_replay(gate: Gate, step: int, session: Any = None) -> Any | None:
+def _check_replay(gate: Gate, step: int, session: Any = None, request_hash: str = "") -> Any | None:
     """Check if the replay engine wants to mock this step.
 
     When a cached response is returned, a ``CacheHitEvent`` is persisted so
     replayed steps appear in the dashboard trace timeline.
+
+    For durable replay, validates that the request hash matches the cached
+    step's hash. A mismatch means LLM call order changed between runs
+    (non-deterministic iteration) — raises ``StateLoomDurableReplayError``.
     """
     engine = get_current_replay_engine()
     if engine is not None and engine.is_active and engine.should_mock(step):
+        # Validate request hash for durable replay (backward compat: skip if either is empty)
+        if request_hash:
+            record = engine._step_index.get(step)
+            if record is not None and record.request_hash and record.request_hash != request_hash:
+                from stateloom.core.errors import StateLoomDurableReplayError
+
+                raise StateLoomDurableReplayError(
+                    session_id=session.id if session else "",
+                    step=step,
+                    expected_hash=record.request_hash,
+                    actual_hash=request_hash,
+                )
+
         logger.debug("Replay: returning cached response for step %d", step)
         cached = engine.get_cached_response(step)
         if cached is not None and session is not None:
@@ -187,7 +204,8 @@ def _intercept_sync(
 
     try:
         session = gate.get_or_create_session(provider=adapter.name)
-        step = session.next_step()
+        is_durable = session.durable
+        step = session.acquire_durable_step() if is_durable else session.next_step()
         logger.debug(
             "Intercept sync: provider=%s model=%s session=%s step=%d",
             adapter.name,
@@ -196,93 +214,111 @@ def _intercept_sync(
             step,
         )
 
-        cached = _check_replay(gate, step, session)
-        if cached is not None:
-            return cached
+        # Compute request hash early for durable sessions (needed for replay validation)
+        durable_request_hash = ""
+        if is_durable:
+            try:
+                normalized_for_hash = adapter.normalize_request(args, kwargs)
+                durable_request_hash = gate.pipeline._hash_request(normalized_for_hash)
+            except Exception:
+                logger.debug("Failed to compute durable request hash", exc_info=True)
 
-        # Extract provider base URL for compliance checks (fail-open)
         try:
-            provider_base_url = adapter.extract_base_url(instance)
-        except Exception:
-            provider_base_url = ""
+            cached = _check_replay(gate, step, session, request_hash=durable_request_hash)
+            if cached is not None:
+                return cached
 
-        # Compliance: force non-streaming for regulated profiles.
-        # Skip when always_streaming — those methods are inherently streaming
-        # (e.g. genai generate_content_stream) and cannot be downgraded via kwarg.
-        is_streaming = always_streaming or adapter.is_streaming(kwargs)
-        profile = gate._get_compliance_profile(session.org_id, session.team_id)
-        if profile and profile.block_streaming and is_streaming and not always_streaming:
-            logger.debug("Compliance: forcing non-streaming for session=%s", session.id)
-            kwargs["stream"] = False
-            is_streaming = False
+            # Extract provider base URL for compliance checks (fail-open)
+            try:
+                provider_base_url = adapter.extract_base_url(instance)
+            except Exception:
+                provider_base_url = ""
 
-        if is_streaming:
+            # Compliance: force non-streaming for regulated profiles.
+            # Skip when always_streaming — those methods are inherently streaming
+            # (e.g. genai generate_content_stream) and cannot be downgraded via kwarg.
+            is_streaming = always_streaming or adapter.is_streaming(kwargs)
+            profile = gate._get_compliance_profile(session.org_id, session.team_id)
+            if profile and profile.block_streaming and is_streaming and not always_streaming:
+                logger.debug("Compliance: forcing non-streaming for session=%s", session.id)
+                kwargs["stream"] = False
+                is_streaming = False
+
+            if is_streaming:
+                normalized_kwargs = adapter.normalize_request(args, kwargs)
+                ctx = gate.pipeline.execute_streaming_sync(
+                    provider=adapter.name,
+                    method=adapter.method_label,
+                    model=model,
+                    request_kwargs=normalized_kwargs,
+                    session=session,
+                    config=gate.config,
+                    provider_base_url=provider_base_url,
+                )
+                if ctx.skip_call and ctx.cached_response is not None:
+                    return ctx.cached_response
+
+                # Create stream PII buffer if enabled
+                stream_buffer = None
+                pii_mw = gate.pipeline.get_middleware("pii_scanner")
+                if pii_mw and hasattr(pii_mw, "create_stream_buffer"):
+                    stream_buffer = pii_mw.create_stream_buffer()
+
+                # Rebuild call args so middleware modifications (PII redaction,
+                # Phase 1 strip) are reflected in the actual provider call.
+                live_args, live_kwargs = adapter.rebuild_call_args(
+                    normalized_kwargs,
+                    args,
+                    kwargs,
+                )
+                result = original(instance, *live_args, **live_kwargs)
+                # For streaming: durable step release happens in the stream wrapper's
+                # finally block, after the stream is fully consumed.
+                return _wrap_stream_sync(
+                    gate,
+                    adapter,
+                    result,
+                    session,
+                    model,
+                    step,
+                    live_kwargs,
+                    ctx=ctx,
+                    stream_buffer=stream_buffer,
+                )
+
             normalized_kwargs = adapter.normalize_request(args, kwargs)
-            ctx = gate.pipeline.execute_streaming_sync(
+
+            def _llm_call() -> Any:
+                # Rebuild call args so middleware modifications (PII redaction,
+                # Phase 1 strip) are reflected in the actual provider call.
+                live_args, live_kwargs = adapter.rebuild_call_args(
+                    normalized_kwargs,
+                    args,
+                    kwargs,
+                )
+                return original(instance, *live_args, **live_kwargs)
+
+            result = gate.pipeline.execute_sync(
                 provider=adapter.name,
                 method=adapter.method_label,
                 model=model,
                 request_kwargs=normalized_kwargs,
                 session=session,
                 config=gate.config,
+                llm_call=_llm_call,
                 provider_base_url=provider_base_url,
             )
-            if ctx.skip_call and ctx.cached_response is not None:
-                return ctx.cached_response
 
-            # Create stream PII buffer if enabled
-            stream_buffer = None
-            pii_mw = gate.pipeline.get_middleware("pii_scanner")
-            if pii_mw and hasattr(pii_mw, "create_stream_buffer"):
-                stream_buffer = pii_mw.create_stream_buffer()
+            # Cost tracking is handled by CostTracker middleware in the pipeline.
+            # No need to add cost here — it would double-count.
 
-            # Rebuild call args so middleware modifications (PII redaction,
-            # Phase 1 strip) are reflected in the actual provider call.
-            live_args, live_kwargs = adapter.rebuild_call_args(
-                normalized_kwargs,
-                args,
-                kwargs,
-            )
-            result = original(instance, *live_args, **live_kwargs)
-            return _wrap_stream_sync(
-                gate,
-                adapter,
-                result,
-                session,
-                model,
-                step,
-                live_kwargs,
-                ctx=ctx,
-                stream_buffer=stream_buffer,
-            )
+            return result
 
-        normalized_kwargs = adapter.normalize_request(args, kwargs)
-
-        def _llm_call() -> Any:
-            # Rebuild call args so middleware modifications (PII redaction,
-            # Phase 1 strip) are reflected in the actual provider call.
-            live_args, live_kwargs = adapter.rebuild_call_args(
-                normalized_kwargs,
-                args,
-                kwargs,
-            )
-            return original(instance, *live_args, **live_kwargs)
-
-        result = gate.pipeline.execute_sync(
-            provider=adapter.name,
-            method=adapter.method_label,
-            model=model,
-            request_kwargs=normalized_kwargs,
-            session=session,
-            config=gate.config,
-            llm_call=_llm_call,
-            provider_base_url=provider_base_url,
-        )
-
-        # Cost tracking is handled by CostTracker middleware in the pipeline.
-        # No need to add cost here — it would double-count.
-
-        return result
+        finally:
+            # Release durable in-flight guard for non-streaming calls.
+            # Streaming calls release in the stream wrapper's finally block.
+            if is_durable and not (always_streaming or adapter.is_streaming(kwargs)):
+                session.release_durable_step()
 
     except StateLoomError:
         raise  # Security errors (PII block, budget, loop) must propagate
@@ -308,7 +344,8 @@ async def _intercept_async(
 
     try:
         session = gate.get_or_create_session(provider=adapter.name)
-        step = session.next_step()
+        is_durable = session.durable
+        step = session.acquire_durable_step() if is_durable else session.next_step()
         logger.debug(
             "Intercept async: provider=%s model=%s session=%s step=%d",
             adapter.name,
@@ -317,92 +354,110 @@ async def _intercept_async(
             step,
         )
 
-        cached = _check_replay(gate, step, session)
-        if cached is not None:
-            return cached
+        # Compute request hash early for durable sessions (needed for replay validation)
+        durable_request_hash = ""
+        if is_durable:
+            try:
+                normalized_for_hash = adapter.normalize_request(args, kwargs)
+                durable_request_hash = gate.pipeline._hash_request(normalized_for_hash)
+            except Exception:
+                logger.debug("Failed to compute durable request hash", exc_info=True)
 
-        # Extract provider base URL for compliance checks (fail-open)
         try:
-            provider_base_url = adapter.extract_base_url(instance)
-        except Exception:
-            provider_base_url = ""
+            cached = _check_replay(gate, step, session, request_hash=durable_request_hash)
+            if cached is not None:
+                return cached
 
-        # Compliance: force non-streaming for regulated profiles.
-        # Skip when always_streaming — those methods are inherently streaming
-        # (e.g. genai generate_content_stream) and cannot be downgraded via kwarg.
-        is_streaming = always_streaming or adapter.is_streaming(kwargs)
-        profile = gate._get_compliance_profile(session.org_id, session.team_id)
-        if profile and profile.block_streaming and is_streaming and not always_streaming:
-            logger.debug("Compliance: forcing non-streaming for session=%s", session.id)
-            kwargs["stream"] = False
-            is_streaming = False
+            # Extract provider base URL for compliance checks (fail-open)
+            try:
+                provider_base_url = adapter.extract_base_url(instance)
+            except Exception:
+                provider_base_url = ""
 
-        if is_streaming:
+            # Compliance: force non-streaming for regulated profiles.
+            # Skip when always_streaming — those methods are inherently streaming
+            # (e.g. genai generate_content_stream) and cannot be downgraded via kwarg.
+            is_streaming = always_streaming or adapter.is_streaming(kwargs)
+            profile = gate._get_compliance_profile(session.org_id, session.team_id)
+            if profile and profile.block_streaming and is_streaming and not always_streaming:
+                logger.debug("Compliance: forcing non-streaming for session=%s", session.id)
+                kwargs["stream"] = False
+                is_streaming = False
+
+            if is_streaming:
+                normalized_kwargs = adapter.normalize_request(args, kwargs)
+                ctx = await gate.pipeline.execute_streaming_async(
+                    provider=adapter.name,
+                    method=adapter.method_label,
+                    model=model,
+                    request_kwargs=normalized_kwargs,
+                    session=session,
+                    config=gate.config,
+                    provider_base_url=provider_base_url,
+                )
+                if ctx.skip_call and ctx.cached_response is not None:
+                    return ctx.cached_response
+
+                # Create stream PII buffer if enabled
+                stream_buffer = None
+                pii_mw = gate.pipeline.get_middleware("pii_scanner")
+                if pii_mw and hasattr(pii_mw, "create_stream_buffer"):
+                    stream_buffer = pii_mw.create_stream_buffer()
+
+                # Rebuild call args so middleware modifications (PII redaction,
+                # Phase 1 strip) are reflected in the actual provider call.
+                live_args, live_kwargs = adapter.rebuild_call_args(
+                    normalized_kwargs,
+                    args,
+                    kwargs,
+                )
+                result = await original(instance, *live_args, **live_kwargs)
+                # For streaming: durable step release happens in the stream wrapper's
+                # finally block, after the stream is fully consumed.
+                return _wrap_stream_async(
+                    gate,
+                    adapter,
+                    result,
+                    session,
+                    model,
+                    step,
+                    live_kwargs,
+                    ctx=ctx,
+                    stream_buffer=stream_buffer,
+                )
+
             normalized_kwargs = adapter.normalize_request(args, kwargs)
-            ctx = await gate.pipeline.execute_streaming_async(
+
+            def _llm_call() -> Any:
+                # Rebuild call args so middleware modifications (PII redaction,
+                # Phase 1 strip) are reflected in the actual provider call.
+                live_args, live_kwargs = adapter.rebuild_call_args(
+                    normalized_kwargs,
+                    args,
+                    kwargs,
+                )
+                return original(instance, *live_args, **live_kwargs)
+
+            result = await gate.pipeline.execute_async(
                 provider=adapter.name,
                 method=adapter.method_label,
                 model=model,
                 request_kwargs=normalized_kwargs,
                 session=session,
                 config=gate.config,
+                llm_call=_llm_call,
                 provider_base_url=provider_base_url,
             )
-            if ctx.skip_call and ctx.cached_response is not None:
-                return ctx.cached_response
 
-            # Create stream PII buffer if enabled
-            stream_buffer = None
-            pii_mw = gate.pipeline.get_middleware("pii_scanner")
-            if pii_mw and hasattr(pii_mw, "create_stream_buffer"):
-                stream_buffer = pii_mw.create_stream_buffer()
+            # Cost tracking is handled by CostTracker middleware in the pipeline.
 
-            # Rebuild call args so middleware modifications (PII redaction,
-            # Phase 1 strip) are reflected in the actual provider call.
-            live_args, live_kwargs = adapter.rebuild_call_args(
-                normalized_kwargs,
-                args,
-                kwargs,
-            )
-            result = await original(instance, *live_args, **live_kwargs)
-            return _wrap_stream_async(
-                gate,
-                adapter,
-                result,
-                session,
-                model,
-                step,
-                live_kwargs,
-                ctx=ctx,
-                stream_buffer=stream_buffer,
-            )
+            return result
 
-        normalized_kwargs = adapter.normalize_request(args, kwargs)
-
-        def _llm_call() -> Any:
-            # Rebuild call args so middleware modifications (PII redaction,
-            # Phase 1 strip) are reflected in the actual provider call.
-            live_args, live_kwargs = adapter.rebuild_call_args(
-                normalized_kwargs,
-                args,
-                kwargs,
-            )
-            return original(instance, *live_args, **live_kwargs)
-
-        result = await gate.pipeline.execute_async(
-            provider=adapter.name,
-            method=adapter.method_label,
-            model=model,
-            request_kwargs=normalized_kwargs,
-            session=session,
-            config=gate.config,
-            llm_call=_llm_call,
-            provider_base_url=provider_base_url,
-        )
-
-        # Cost tracking is handled by CostTracker middleware in the pipeline.
-
-        return result
+        finally:
+            # Release durable in-flight guard for non-streaming calls.
+            # Streaming calls release in the stream wrapper's finally block.
+            if is_durable and not (always_streaming or adapter.is_streaming(kwargs)):
+                session.release_durable_step()
 
     except StateLoomError:
         raise  # Security errors (PII block, budget, loop) must propagate
@@ -445,7 +500,67 @@ def _wrap_stream_sync(
     is_durable = session.durable
     durable_chunks: list[Any] | None = [] if is_durable else None
 
+    # Buffered mode: buffer all chunks, persist event, then yield for crash safety
+    use_buffer_mode = (
+        is_durable and gate.config.durable_stream_buffer and isinstance(ctx, MiddlewareContext)
+    )
+
     try:
+        if use_buffer_mode:
+            # Buffer all chunks without yielding
+            buffered_chunks: list[Any] = []
+            for chunk in stream:
+                accumulated = adapter.extract_stream_tokens(chunk, accumulated)
+                if stream_buffer is not None:
+                    chunk_info = adapter.extract_chunk_info(chunk)
+                    if chunk_info.text_delta:
+                        clean = stream_buffer.feed(chunk_info.text_delta)
+                        if clean is not None:
+                            chunk = adapter.modify_chunk_text(chunk, clean)
+                            last_chunk = chunk
+                            buffered_chunks.append(chunk)
+                    else:
+                        buffered_chunks.append(chunk)
+                else:
+                    buffered_chunks.append(chunk)
+
+            # Flush stream buffer
+            if stream_buffer is not None:
+                try:
+                    final = stream_buffer.flush()
+                    if final and last_chunk is not None:
+                        flushed = adapter.modify_chunk_text(last_chunk, final)
+                        buffered_chunks.append(flushed)
+                except Exception:
+                    logger.debug("Stream buffer flush failed", exc_info=True)
+
+            # Persist event BEFORE yielding (crash safe)
+            durable_chunks = buffered_chunks
+            total_prompt = accumulated.get("prompt_tokens", 0)
+            total_completion = accumulated.get("completion_tokens", 0)
+            assert isinstance(ctx, MiddlewareContext)
+            ctx.prompt_tokens = total_prompt
+            ctx.completion_tokens = total_completion
+            ctx._stream_error = None
+
+            if durable_chunks:
+                try:
+                    from stateloom.replay.schema import serialize_stream_chunks
+
+                    ctx._durable_cached_json = serialize_stream_chunks(durable_chunks, adapter.name)
+                except Exception:
+                    pass  # fail-open
+
+            for callback in ctx._on_stream_complete:
+                try:
+                    callback()
+                except Exception:
+                    logger.debug("Stream complete callback failed", exc_info=True)
+
+            # Now yield all buffered chunks
+            yield from buffered_chunks
+            return  # skip the normal finally path (already handled above)
+
         for chunk in stream:
             accumulated = adapter.extract_stream_tokens(chunk, accumulated)
             if stream_buffer is not None:
@@ -471,6 +586,10 @@ def _wrap_stream_sync(
         error = exc
         raise
     finally:
+        # Release durable in-flight guard (stream fully consumed or errored)
+        if is_durable:
+            session.release_durable_step()
+
         # Flush stream buffer
         if stream_buffer is not None and error is None:
             try:
@@ -560,7 +679,68 @@ async def _wrap_stream_async(
     is_durable = session.durable
     durable_chunks: list[Any] | None = [] if is_durable else None
 
+    # Buffered mode: buffer all chunks, persist event, then yield for crash safety
+    use_buffer_mode = (
+        is_durable and gate.config.durable_stream_buffer and isinstance(ctx, MiddlewareContext)
+    )
+
     try:
+        if use_buffer_mode:
+            # Buffer all chunks without yielding
+            buffered_chunks: list[Any] = []
+            async for chunk in stream:
+                accumulated = adapter.extract_stream_tokens(chunk, accumulated)
+                if stream_buffer is not None:
+                    chunk_info = adapter.extract_chunk_info(chunk)
+                    if chunk_info.text_delta:
+                        clean = stream_buffer.feed(chunk_info.text_delta)
+                        if clean is not None:
+                            chunk = adapter.modify_chunk_text(chunk, clean)
+                            last_chunk = chunk
+                            buffered_chunks.append(chunk)
+                    else:
+                        buffered_chunks.append(chunk)
+                else:
+                    buffered_chunks.append(chunk)
+
+            # Flush stream buffer
+            if stream_buffer is not None:
+                try:
+                    final = stream_buffer.flush()
+                    if final and last_chunk is not None:
+                        flushed = adapter.modify_chunk_text(last_chunk, final)
+                        buffered_chunks.append(flushed)
+                except Exception:
+                    logger.debug("Stream buffer flush failed", exc_info=True)
+
+            # Persist event BEFORE yielding (crash safe)
+            durable_chunks = buffered_chunks
+            total_prompt = accumulated.get("prompt_tokens", 0)
+            total_completion = accumulated.get("completion_tokens", 0)
+            assert isinstance(ctx, MiddlewareContext)
+            ctx.prompt_tokens = total_prompt
+            ctx.completion_tokens = total_completion
+            ctx._stream_error = None
+
+            if durable_chunks:
+                try:
+                    from stateloom.replay.schema import serialize_stream_chunks
+
+                    ctx._durable_cached_json = serialize_stream_chunks(durable_chunks, adapter.name)
+                except Exception:
+                    pass  # fail-open
+
+            for callback in ctx._on_stream_complete:
+                try:
+                    callback()
+                except Exception:
+                    logger.debug("Stream complete callback failed", exc_info=True)
+
+            # Now yield all buffered chunks
+            for buffered_chunk in buffered_chunks:
+                yield buffered_chunk
+            return  # skip the normal finally path (already handled above)
+
         async for chunk in stream:
             accumulated = adapter.extract_stream_tokens(chunk, accumulated)
             if stream_buffer is not None:
@@ -586,6 +766,10 @@ async def _wrap_stream_async(
         error = exc
         raise
     finally:
+        # Release durable in-flight guard (stream fully consumed or errored)
+        if is_durable:
+            session.release_durable_step()
+
         # Flush stream buffer
         if stream_buffer is not None and error is None:
             try:

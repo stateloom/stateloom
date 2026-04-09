@@ -1287,11 +1287,22 @@ stateloom.init(durable_stream_delay_ms=30)  # 30ms between cached chunks
 2. **Crash recovery**: On resume, cached responses are loaded and returned instantly for completed steps. Cached streaming responses are returned as iterables that support both `for chunk in ...` (sync) and `async for chunk in ...` (async).
 3. **Idempotent re-run**: A fully completed session returns all steps from cache (zero cost)
 
+### Safety features
+
+- **Hash mismatch detection**: Each LLM call's request is hashed and stored alongside the cached response. On resume, if the request hash at a given step differs from the cached one, StateLoom raises `StateLoomDurableReplayError` instead of silently returning the wrong cached response. This catches non-deterministic iteration order (e.g., unordered DB queries, `os.listdir()`, sets) that would cause step ordinals to shift between runs.
+- **Concurrency guard**: Durable sessions reject concurrent LLM calls (`asyncio.gather()`, threads) with an immediate error. Concurrent calls make step ordinal assignment non-deterministic, which would corrupt the replay cache. Use non-durable sessions for parallel calls.
+- **Buffered streaming** (opt-in): By default, streaming durable calls persist the cache entry after the caller consumes all chunks. A crash during consumption loses that entry. Enable `durable_stream_buffer=True` to buffer all chunks internally, persist, then yield — trading first-token latency for crash safety.
+
+```python
+stateloom.init(durable_stream_buffer=True)  # buffer streaming for crash safety
+```
+
 ### Limitations
 
 - **Tool calls re-execute**: Only LLM calls are cached; `@stateloom.tool()` functions re-execute on every run
-- **Code must be deterministic**: Like Temporal, the code path must be the same on every run for step numbers to match
+- **Code must be deterministic**: Like Temporal, the code path must be the same on every run for step numbers to match — StateLoom now enforces this with request hash validation (see Safety features above)
 - **Session ID required**: `durable=True` without a `session_id` is a no-op
+- **No concurrent LLM calls**: Durable sessions require sequential calls to ensure deterministic step ordering
 
 ### Async support
 
@@ -2353,6 +2364,7 @@ stateloom.init(
     guardrails_mode="audit", # "audit" or "enforce"
     prompts_dir="",          # e.g. "prompts/" for file-based agent management
     durable_stream_delay_ms=0, # replay delay for cached streams
+    durable_stream_buffer=False, # buffer streaming for crash safety
 )
 ```
 
@@ -2588,6 +2600,7 @@ config = StateLoomConfig.from_yaml("stateloom.yaml")
 | Option | Default | Description |
 |--------|---------|-------------|
 | `durable_stream_delay_ms` | `0` | Inter-chunk delay (ms) when replaying cached streams (0 = instant) |
+| `durable_stream_buffer` | `False` | Buffer all streaming chunks before yielding in durable sessions (trades first-token latency for crash safety) |
 
 **Prompts**
 

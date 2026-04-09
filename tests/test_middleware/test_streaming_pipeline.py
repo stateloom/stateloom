@@ -735,10 +735,12 @@ class TestStreamErrorHandling:
         from stateloom.intercept.generic_interceptor import _wrap_stream_sync
 
         gate = MagicMock()
+        gate.config.durable_stream_buffer = False
         adapter = MagicMock()
         adapter.extract_stream_tokens.side_effect = lambda c, a: a
         session = MagicMock()
         session.id = "test"
+        session.durable = False
         ctx = MiddlewareContext(
             session=Session(id="test"),
             config=_make_config(),
@@ -766,10 +768,12 @@ class TestStreamErrorHandling:
         from stateloom.intercept.generic_interceptor import _wrap_stream_sync
 
         gate = MagicMock()
+        gate.config.durable_stream_buffer = False
         adapter = MagicMock()
         adapter.extract_stream_tokens.side_effect = lambda c, a: a
         session = MagicMock()
         session.id = "test"
+        session.durable = False
         ctx = MiddlewareContext(
             session=Session(id="test"),
             config=_make_config(),
@@ -795,6 +799,7 @@ class TestStreamErrorHandling:
 
         gate = MagicMock()
         gate.pricing.calculate_cost.return_value = 0.01
+        gate.config.durable_stream_buffer = False
 
         adapter = MagicMock()
         adapter.name = "openai"
@@ -802,6 +807,7 @@ class TestStreamErrorHandling:
 
         session = MagicMock()
         session.id = "test"
+        session.durable = False
 
         def simple_stream():
             yield "chunk1"

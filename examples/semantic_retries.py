@@ -57,6 +57,10 @@ else:
 
 print(f"Using model: {MODEL} (provider: {PROVIDER})\n")
 
+# Session IDs include the provider so switching API keys creates fresh sessions
+# instead of replaying cached responses from a different provider.
+SID_PREFIX = f"{PROVIDER}-"
+
 
 def sdk_chat(prompt: str, system: str | None = None) -> str:
     """Call the native SDK — auto-patched by StateLoom."""
@@ -225,7 +229,7 @@ print("4. durable_task decorator (stateloom.chat)")
 print("=" * 60)
 
 
-@stateloom.durable_task(retries=3, session_id="durable-retry-demo", budget=2.0)
+@stateloom.durable_task(retries=3, session_id=f"{SID_PREFIX}durable-retry-demo", budget=2.0)
 def extract_tech_stack(company: str) -> dict:
     """Extract structured tech facts — retries on bad JSON."""
     response = stateloom.chat(
@@ -279,7 +283,7 @@ def count_retries(attempt: int, error: Exception) -> None:
 
 @stateloom.durable_task(
     retries=3,
-    session_id="durable-sdk-retry-demo",
+    session_id=f"{SID_PREFIX}durable-sdk-retry-demo",
     budget=2.0,
     on_retry=count_retries,
 )

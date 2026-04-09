@@ -7,6 +7,9 @@ Demonstrates:
   - Semantic retries with retry_loop (self-healing bad output)
   - durable_task decorator (session + retries combined)
   - Named checkpoints for progress tracking
+  - Safety: hash mismatch detection (non-deterministic call order)
+  - Safety: concurrency guard (rejects parallel calls in durable sessions)
+  - Buffered streaming (opt-in crash-safe streaming via durable_stream_buffer)
 
 Run:
 
@@ -59,6 +62,10 @@ else:
 
 print(f"Using model: {MODEL} (provider: {PROVIDER})\n")
 
+# Session IDs include the provider so switching API keys creates fresh sessions
+# instead of replaying cached responses from a different provider.
+SID_PREFIX = f"{PROVIDER}-"
+
 
 def sdk_chat(prompt: str, system: str | None = None) -> str:
     """Call the native SDK — auto-patched by StateLoom, so durable/cost tracking works."""
@@ -93,7 +100,7 @@ print("=" * 60)
 print("1. Durable session (run twice to see replay)")
 print("=" * 60)
 
-with stateloom.session("durable-demo-1", budget=2.0, durable=True) as s:
+with stateloom.session(f"{SID_PREFIX}durable-demo-1", budget=2.0, durable=True) as s:
     # Step 1 — on first run: live LLM call. On second run: instant replay.
     response = stateloom.chat(
         model=MODEL,
@@ -133,7 +140,7 @@ print("=" * 60)
 print("2. Named checkpoints (native SDK calls)")
 print("=" * 60)
 
-with stateloom.session("checkpoint-demo", budget=2.0, durable=True) as s:
+with stateloom.session(f"{SID_PREFIX}checkpoint-demo", budget=2.0, durable=True) as s:
     stateloom.checkpoint("data-loaded", "Input data validated and ready")
     print("  Checkpoint: data-loaded")
 
@@ -194,7 +201,7 @@ print("4. durable_task decorator (session + retries)")
 print("=" * 60)
 
 
-@stateloom.durable_task(retries=3, session_id="durable-task-demo", budget=2.0)
+@stateloom.durable_task(retries=3, session_id=f"{SID_PREFIX}durable-task-demo", budget=2.0)
 def extract_facts(topic: str) -> dict:
     """Extract structured facts — retries automatically on bad JSON."""
     response = stateloom.chat(
@@ -228,4 +235,72 @@ try:
 except stateloom.StateLoomRetryError as e:
     print(f"  All retries exhausted: {e}")
 
-print("\nDashboard: http://localhost:4782")
+print()
+
+
+# ── 5. Hash mismatch detection (safety) ────────────────────────────
+# Durable sessions now hash each LLM request and validate on replay.
+# If the call order changes between runs (e.g., non-deterministic
+# iteration), StateLoom raises StateLoomDurableReplayError instead
+# of silently returning the wrong cached response.
+
+print("=" * 60)
+print("5. Hash mismatch detection (safety guard)")
+print("=" * 60)
+
+print("  Durable sessions hash each request and validate on replay.")
+print("  If you reorder calls between runs, StateLoom catches it:")
+print()
+print("    from stateloom import StateLoomDurableReplayError")
+print()
+print("    # Run 1: calls A then B (steps 1, 2)")
+print("    # Run 2: calls B then A (steps 1, 2) — hash mismatch!")
+print("    # → StateLoomDurableReplayError at step 1")
+print()
+print("  This prevents silent wrong data from non-deterministic sources")
+print("  like unordered DB queries, os.listdir(), or set iteration.")
+
+print()
+
+
+# ── 6. Concurrency guard ──────────────────────────────────────────
+# Durable sessions now reject concurrent LLM calls. Parallel calls
+# make step ordinals non-deterministic, which corrupts replay.
+
+print("=" * 60)
+print("6. Concurrency guard (durable sessions are sequential)")
+print("=" * 60)
+
+print("  Durable sessions require sequential LLM calls.")
+print("  Concurrent calls (asyncio.gather, threads) raise immediately:")
+print()
+print("    with stateloom.session('my-task', durable=True) as s:")
+print("        # This would raise StateLoomError:")
+print("        # asyncio.gather(call_a(), call_b())")
+print()
+print("  Use non-durable sessions for parallel calls.")
+
+print()
+
+
+# ── 7. Buffered streaming (opt-in crash safety) ───────────────────
+# By default, streaming durable calls persist after the caller
+# consumes all chunks. A crash mid-stream loses the cache entry.
+# Enable durable_stream_buffer=True to buffer internally first.
+
+print("=" * 60)
+print("7. Buffered streaming (opt-in crash safety)")
+print("=" * 60)
+
+print("  Default: streaming chunks yield in real-time, cached after stream ends.")
+print("  Risk: a crash mid-stream loses the cache entry for that step.")
+print()
+print("  Opt-in buffer mode persists before yielding:")
+print()
+print("    stateloom.init(durable_stream_buffer=True)")
+print()
+print("  Trade-off: first-token latency increases (all chunks buffered),")
+print("  but a crash can never lose a partially-consumed stream.")
+
+print()
+print("Dashboard: http://localhost:4782")

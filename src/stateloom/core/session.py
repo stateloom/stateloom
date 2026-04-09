@@ -107,11 +107,43 @@ class Session(BaseModel):
     # Private: Thread safety for accumulators
     _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
+    # Private: Durable concurrency guard — tracks in-flight LLM calls to
+    # detect concurrent calls that would make step ordinals non-deterministic.
+    _durable_in_flight: int = PrivateAttr(default=0)
+
     def next_step(self) -> int:
         """Increment and return the next step number (thread-safe)."""
         with self._lock:
             self.step_counter += 1
             return self.step_counter
+
+    def acquire_durable_step(self) -> int:
+        """Increment and return the next step number, with concurrency guard for durable sessions.
+
+        For durable sessions, raises ``StateLoomError`` if another LLM call is
+        already in-flight. For non-durable sessions, behaves identically to
+        ``next_step()``.
+        """
+        with self._lock:
+            if self.durable and self._durable_in_flight > 0:
+                from stateloom.core.errors import StateLoomError
+
+                raise StateLoomError(
+                    "Concurrent LLM calls detected in durable session "
+                    f"'{self.id}'. Durable sessions require sequential calls "
+                    "to ensure deterministic step ordering. Use asyncio.gather() "
+                    "only with non-durable sessions.",
+                )
+            self.step_counter += 1
+            if self.durable:
+                self._durable_in_flight += 1
+            return self.step_counter
+
+    def release_durable_step(self) -> None:
+        """Release the durable in-flight guard after an LLM call completes."""
+        with self._lock:
+            if self._durable_in_flight > 0:
+                self._durable_in_flight -= 1
 
     def add_cost(
         self,

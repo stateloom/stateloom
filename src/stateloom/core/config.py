@@ -400,6 +400,11 @@ class StateLoomConfig(BaseSettings):
     # Durable streaming replay delay (milliseconds between chunks on replay)
     durable_stream_delay_ms: float = 0
 
+    # Durable streaming buffer mode — when True, streaming durable calls buffer
+    # all chunks internally, persist the event, then yield. Trades first-token
+    # latency for crash safety (no window where a crash loses the cache entry).
+    durable_stream_buffer: bool = False
+
     # Prompt file watching (individual agent management)
     prompts_dir: str = ""  # empty = disabled. e.g., "prompts/" or absolute path
     prompts_poll_interval: float = 2.0  # seconds (passed to watchdog Observer timeout)

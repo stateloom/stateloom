@@ -92,7 +92,7 @@ To route additional models through StateLoom, add them to both sections:
 1. **`models.providers.stateloom.models`** — registers the model with OpenClaw
 2. **`agents.defaults.models`** — makes it available in the agent picker
 
-The model `id` must match a model name that StateLoom can route to the correct upstream provider (e.g. `gpt-4o`, `claude-sonnet-4-20250514`, `gemini-2.0-flash`).
+The model `id` must match a model name that StateLoom can route to the correct upstream provider (e.g. `gpt-4o`, `claude-sonnet-4-20250514`, `gemini-2.5-flash`).
 
 ## Verifying
 

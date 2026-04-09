@@ -15,6 +15,7 @@ Demonstrates:
     - Self-consistency: multiple samples from one model
     - Greedy downgrade: auto-switch to cheaper models after easy consensus
     - Agent-guided consensus: debate using an agent's system prompt
+    - Persona-driven consensus: named debaters with custom prompts and visibility
     - Mixed stateloom.chat() + consensus in one session
 
 Requires API keys for at least TWO providers:
@@ -356,12 +357,117 @@ print_result(result)
 print()
 
 
-# ── 11. Mixed session — agents + consensus + stateloom.chat() ─────────
+# ── 11. Persona-driven consensus ──────────────────────────────────
+# Instead of flat model lists, define named debaters with their own
+# system prompts and visibility rules. Each persona has a name, model,
+# system_prompt, and optional 'sees' list (who they can read).
+
+print("=" * 60)
+print("B6. Persona-Driven Consensus — named debaters")
+print("=" * 60)
+
+result = stateloom.consensus_sync(
+    prompt="A fintech startup needs to choose a primary programming language. "
+    "They need high performance, strong type safety, and good hiring pool. "
+    "What should they pick?",
+    personas=[
+        {
+            "name": "CTO",
+            "model": models[0],
+            "system_prompt": (
+                "You are a startup CTO focused on shipping speed and hiring. "
+                "Prioritize developer productivity and ecosystem maturity."
+            ),
+        },
+        {
+            "name": "Security Lead",
+            "model": models[1],
+            "system_prompt": (
+                "You are a security engineer focused on memory safety, "
+                "type safety, and secure-by-default practices."
+            ),
+        },
+        *(
+            [
+                {
+                    "name": "Performance Engineer",
+                    "model": models[2],
+                    "system_prompt": (
+                        "You are a performance engineer focused on latency, "
+                        "throughput, and runtime efficiency."
+                    ),
+                }
+            ]
+            if len(models) >= 3
+            else []
+        ),
+    ],
+    strategy="debate",
+    rounds=2,
+    budget=2.0,
+)
+
+print_result(result)
+if result.winner_persona:
+    print(f"  Winner persona: {result.winner_persona}")
+print()
+
+
+# ── 12. Persona visibility rules ─────────────────────────────────
+# The 'sees' field controls which other personas a debater can read
+# in subsequent rounds. None = sees all (default).
+
+print("=" * 60)
+print("B7. Persona Visibility — selective information flow")
+print("=" * 60)
+
+result = stateloom.consensus_sync(
+    prompt="Should we open-source our core product?",
+    personas=[
+        {
+            "name": "CEO",
+            "model": models[0],
+            "system_prompt": "You are a CEO focused on business strategy and revenue.",
+            "sees": ["CTO"],  # CEO only sees CTO's arguments
+        },
+        {
+            "name": "CTO",
+            "model": models[1],
+            "system_prompt": "You are a CTO focused on engineering culture and talent.",
+            "sees": ["CEO", *(["Community Lead"] if len(models) >= 3 else [])],
+        },
+        *(
+            [
+                {
+                    "name": "Community Lead",
+                    "model": models[2],
+                    "system_prompt": (
+                        "You are a developer relations lead focused on community "
+                        "growth, adoption, and contributor experience."
+                    ),
+                    # sees=None → sees all others (default)
+                }
+            ]
+            if len(models) >= 3
+            else []
+        ),
+    ],
+    strategy="debate",
+    rounds=2,
+    budget=2.0,
+)
+
+print_result(result)
+print("  (Each persona only saw arguments from personas in their 'sees' list)")
+print()
+
+
+# ── 13. Mixed session — agents + consensus + stateloom.chat() ─────────
 # Combine everything in one tracked session: agent calls for routine
 # work, consensus for the critical decision, regular chat for polish.
 
 print("=" * 60)
-print("B6. Mixed Session — agents + consensus + stateloom.chat()")
+print("B8. Mixed Session — agents + consensus + stateloom.chat()")
 print("=" * 60)
 
 with stateloom.session("full-pipeline-demo", budget=5.0) as s:

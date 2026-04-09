@@ -305,6 +305,7 @@ def _load_durable_steps(gate: Gate, session_id: str) -> list[StepRecord]:
                 model=getattr(event, "model", None),
                 cached_response_json=cached_json,
                 prompt_preview=getattr(event, "prompt_preview", ""),
+                request_hash=getattr(event, "request_hash", "") or "",
             )
         )
     return steps
