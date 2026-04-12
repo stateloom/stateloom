@@ -56,7 +56,8 @@ migrations = ["alembic>=1.13", "sqlalchemy>=2.0"]
 mistral = ["mistralai>=1.0"]
 cohere = ["cohere>=5.0"]
 litellm = ["litellm>=1.40"]
-all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]", "stateloom[auth]"]
+openclaw = ["nodeenv>=1.9"]
+all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]", "stateloom[auth]", "stateloom[openclaw]"]
 typecheck = [
     "mypy==1.19.1",
     "openai>=1.0",

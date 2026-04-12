@@ -57,6 +57,11 @@ from stateloom.cli.ollama_commands import ollama  # noqa: E402
 
 main.add_command(ollama)
 
+# Register openclaw subcommand group
+from stateloom.cli.openclaw_commands import openclaw  # noqa: E402
+
+main.add_command(openclaw)
+
 # Register diagnostic commands
 from stateloom.cli.doctor_command import doctor  # noqa: E402
 from stateloom.cli.stats_command import stats  # noqa: E402

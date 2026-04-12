@@ -490,6 +490,27 @@ async function loadSessionDetail(sessionId) {
         } else {
             orgBudgetRow.style.display = 'none';
         }
+        // Global budget — show when budget_global is configured
+        const globalBudgetRow = document.getElementById('detail-budget-global-row');
+        try {
+            const [configData, statsData] = await Promise.all([fetchJSON('/config'), fetchJSON('/stats')]);
+            if (configData && configData.budget_global != null) {
+                const globalSpend = statsData ? (statsData.total_cost || 0) : 0;
+                const globalLimit = configData.budget_global;
+                const globalRawPct = (globalSpend / globalLimit) * 100;
+                const globalPct = Math.min(globalRawPct, 100);
+                document.getElementById('detail-budget-global-text').textContent =
+                    `$${globalSpend.toFixed(6)} / $${globalLimit.toFixed(6)}`;
+                const globalBar = document.getElementById('detail-budget-global-progress');
+                globalBar.style.width = globalPct + '%';
+                globalBar.className = globalRawPct > 90 ? 'budget-progress budget-danger' : 'budget-progress';
+                globalBudgetRow.style.display = 'block';
+            } else {
+                globalBudgetRow.style.display = 'none';
+            }
+        } catch (_e) {
+            globalBudgetRow.style.display = 'none';
+        }
         budgetCard.style.display = 'block';
     } else {
         budgetCard.style.display = 'none';
