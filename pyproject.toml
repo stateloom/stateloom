@@ -130,6 +130,8 @@ module = [
     "stateloom.auth.jwt",
     "stateloom.auth.oidc",
     "stateloom.proxy.router",
+    "stateloom.cache.semantic",
+    "stateloom.cli.openclaw_commands",
 ]
 warn_unused_ignores = false
 

@@ -55,6 +55,10 @@ def _resolve_provider(model: str) -> str:
     including Mistral, Cohere, etc.), then falls back to legacy regex
     patterns as a safety net for when the registry is empty (before init()).
     """
+    # Explicit local model prefix — skip adapter registry entirely
+    if model.startswith("ollama:"):
+        return "local"
+
     from stateloom.intercept.provider_registry import resolve_provider
 
     result = resolve_provider(model)

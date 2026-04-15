@@ -45,6 +45,17 @@ class OllamaAdapter(BaseProviderAdapter):
     def extract_content(self, response: Any) -> str:
         if isinstance(response, OllamaResponse):
             return response.content
+        # OpenAI SDK ChatCompletion (from ollama: prefix via OpenAI-compat endpoint)
+        try:
+            choices = getattr(response, "choices", None)
+            if choices:
+                msg = getattr(choices[0], "message", None)
+                if msg is not None:
+                    content = getattr(msg, "content", None)
+                    if isinstance(content, str):
+                        return content
+        except Exception:
+            pass
         try:
             content = getattr(response, "content", None)
             if isinstance(content, str):
@@ -71,6 +82,12 @@ class OllamaAdapter(BaseProviderAdapter):
         if isinstance(response, OllamaResponse):
             prompt_tokens = response.prompt_tokens
             completion_tokens = response.completion_tokens
+        else:
+            # OpenAI SDK ChatCompletion (from ollama: prefix path)
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(usage, "completion_tokens", 0) or 0
 
         return _make_completion(
             content=content,

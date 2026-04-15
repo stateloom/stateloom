@@ -950,6 +950,54 @@ def _build_anthropic_llm_call(
     return llm_call
 
 
+def _build_ollama_llm_call(
+    request_kwargs: dict[str, Any],
+    model: str,
+    ollama_host: str,
+) -> Callable[[], Any]:
+    """Build an Ollama SDK call closure via Ollama's OpenAI-compat endpoint.
+
+    Points an unpatched ``openai.OpenAI`` client at Ollama's ``/v1`` endpoint
+    with a dummy API key.  Reads specific fields from *request_kwargs* at call
+    time so middleware modifications (e.g. PII redaction) propagate.
+
+    ``tools`` and ``tool_choice`` are always stripped — most local models
+    do not support tool calling.
+    """
+    _rk = request_kwargs
+
+    def llm_call() -> Any:
+        import openai
+
+        from stateloom.intercept.unpatch import get_original
+
+        client = openai.OpenAI(base_url=f"{ollama_host}/v1", api_key="ollama")
+
+        sdk_kwargs: dict[str, Any] = {
+            "model": _rk.get("model", model),
+            "messages": _rk.get("messages", []),
+        }
+        for k in (
+            "temperature",
+            "max_tokens",
+            "top_p",
+            "n",
+            "stop",
+            "presence_penalty",
+            "frequency_penalty",
+            "seed",
+        ):
+            if k in _rk:
+                sdk_kwargs[k] = _rk[k]
+
+        original = get_original(type(client.chat.completions), "create")
+        if original:
+            return original(client.chat.completions, **sdk_kwargs)
+        return client.chat.completions.create(**sdk_kwargs)
+
+    return llm_call
+
+
 def _build_openai_compat_llm_call(
     request_kwargs: dict[str, Any],
     provider_keys: dict[str, str],
@@ -1135,8 +1183,17 @@ async def _handle_provider_sdk(
                 if k in extra_kwargs:
                     request_kwargs[k] = extra_kwargs[k]
 
+            # Strip ollama: prefix so downstream middleware sees the real model name
+            if provider == "local" and model.startswith("ollama:"):
+                actual_model = model.removeprefix("ollama:")
+                request_kwargs["model"] = actual_model
+                model = actual_model
+
             # Build the provider-specific llm_call closure
-            if provider == "gemini":
+            if provider == "local":
+                ollama_host = gate.config.local_model_host or "http://localhost:11434"
+                llm_call = _build_ollama_llm_call(request_kwargs, model, ollama_host)
+            elif provider == "gemini":
                 llm_call = _build_gemini_llm_call(request_kwargs, provider_keys, model)
             elif provider == "anthropic":
                 llm_call = _build_anthropic_llm_call(request_kwargs, provider_keys, model)

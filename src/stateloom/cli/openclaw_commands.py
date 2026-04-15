@@ -159,6 +159,20 @@ def _apply_stateloom_config(
 ) -> dict[str, Any]:
     """Deep-merge StateLoom provider config into OpenClaw config."""
     openclaw_models = _build_openclaw_models()
+
+    # Add ollama: models directly (they aren't in prices.json)
+    for mid in model_ids:
+        if mid.startswith("ollama:"):
+            actual = mid.removeprefix("ollama:")
+            openclaw_models.append(
+                {
+                    "id": mid,
+                    "name": f"Ollama {actual} (Local via StateLoom)",
+                    "maxTokens": _DEFAULT_MAX_OUTPUT,
+                    "contextWindow": _DEFAULT_CONTEXT,
+                }
+            )
+
     base_url = f"http://{host}:{port}/v1"
 
     # models.providers.stateloom
@@ -322,13 +336,14 @@ def launch(host: str, port: int, model: str, no_auth: bool, verbose: bool) -> No
     \b
     Automatically configures OpenClaw, prompts for provider API keys
     if not already in the environment, starts StateLoom, and launches
-    OpenClaw.
+    OpenClaw.  Use the ollama: prefix for local models.
 
     \b
     Examples:
         stateloom openclaw launch --model gemini-2.5-flash
         stateloom openclaw launch --model gemini-2.5-flash,gpt-4o,claude-haiku-4-5
-        stateloom openclaw launch --model claude-haiku-4-5-20251001 --no-auth
+        stateloom openclaw launch --model ollama:llama3.2:1b --no-auth
+        stateloom openclaw launch --model gemini-2.5-flash,ollama:llama3.2:1b
     """
     # Parse comma-separated model list
     model_ids = [m.strip() for m in model.split(",") if m.strip()]
@@ -336,17 +351,21 @@ def launch(host: str, port: int, model: str, no_auth: bool, verbose: bool) -> No
         click.echo("Error: --model must specify at least one model.")
         raise SystemExit(1)
 
-    # Validate all models
-    known = _get_known_model_ids()
-    for m in model_ids:
-        if m not in known:
-            click.echo(f"Error: Unknown model '{m}'.")
-            click.echo(f"Available models: {', '.join(sorted(known))}")
-            raise SystemExit(1)
+    # Separate cloud models (need validation + API keys) from local ollama: models
+    cloud_ids = [m for m in model_ids if not m.startswith("ollama:")]
+
+    # Validate cloud models against prices.json
+    if cloud_ids:
+        known = _get_known_model_ids()
+        for m in cloud_ids:
+            if m not in known:
+                click.echo(f"Error: Unknown model '{m}'.")
+                click.echo(f"Available models: {', '.join(sorted(known))}")
+                raise SystemExit(1)
 
     # Ensure API keys are available (prompt if missing), deduplicate by provider
     seen_env_vars: set[str] = set()
-    for m in model_ids:
+    for m in cloud_ids:
         for prefix, (var, _name) in _PROVIDER_ENV_KEYS.items():
             if m.startswith(prefix):
                 if var not in seen_env_vars:

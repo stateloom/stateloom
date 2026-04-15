@@ -156,26 +156,37 @@ def pull(model: str, port: int) -> None:
 @ollama.command("list")
 @click.option("--port", default=DEFAULT_PORT, type=int, show_default=True, help="Port number")
 def list_cmd(port: int) -> None:
-    """List downloaded models."""
-    mgr = OllamaManager()
+    """List downloaded models.
 
-    if not mgr.is_running(port=port):
-        click.echo(f"Managed Ollama is not running on port {port}.")
-        click.echo("Run: stateloom ollama start")
-        raise SystemExit(1)
+    Queries the Ollama HTTP API directly.  Works with both the managed
+    Ollama instance and a standalone ``ollama serve`` on the default port.
+    """
+    import httpx
 
-    try:
-        import httpx
+    # Try the requested port first, then fall back to the default Ollama port
+    ports_to_try = [port]
+    if port != 11434:
+        ports_to_try.append(11434)
 
-        with httpx.Client(
-            base_url=f"http://127.0.0.1:{port}",
-            timeout=httpx.Timeout(5.0),
-        ) as client:
-            resp = client.get("/api/tags")
-            resp.raise_for_status()
-            models = resp.json().get("models", [])
-    except Exception as e:
-        click.echo(f"Failed to list models: {e}")
+    models: list[dict[str, Any]] = []
+    connected_port = 0
+    for p in ports_to_try:
+        try:
+            with httpx.Client(
+                base_url=f"http://127.0.0.1:{p}",
+                timeout=httpx.Timeout(5.0),
+            ) as client:
+                resp = client.get("/api/tags")
+                resp.raise_for_status()
+                models = resp.json().get("models", [])
+                connected_port = p
+                break
+        except Exception:
+            continue
+
+    if not connected_port:
+        click.echo(f"No Ollama instance found on port {port} or 11434.")
+        click.echo("Run: stateloom ollama start  (or: ollama serve)")
         raise SystemExit(1)
 
     if not models:
