@@ -46,9 +46,13 @@ CLAUDE.md
 
 # Internal notes
 TODO.md
+COMPARE.md
 
 # Archive (internal docs, demos, loose scripts)
 _archive/
+
+# Demo (marketing demo, screenshots, cassettes, charts)
+demo/
 
 # Database
 *.db
