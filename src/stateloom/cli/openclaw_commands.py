@@ -251,7 +251,7 @@ def _get_openclaw_binary() -> str | None:
 def _install_openclaw() -> str:
     """Install OpenClaw into a managed Node.js environment via nodeenv + npm."""
     try:
-        import nodeenv  # type: ignore[import-untyped]  # noqa: F401
+        import nodeenv  # type: ignore[import-not-found,import-untyped,unused-ignore]  # noqa: F401
     except ImportError:
         click.echo("Error: OpenClaw is not installed and the 'openclaw' extra is missing.")
         click.echo("")

@@ -69,7 +69,8 @@ class SemanticMatcher:
         """Extract text from request kwargs and return a normalized embedding vector."""
         text = self._extract_text(request_kwargs)
         embedding = self._model.encode(text, normalize_embeddings=True)
-        return embedding.tolist()
+        result: list[float] = embedding.tolist()
+        return result
 
     def add(self, entry: CacheEntry) -> None:
         """Add a cache entry to the vector index."""

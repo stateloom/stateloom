@@ -10,11 +10,12 @@ repos:
     hooks:
       - id: mypy
         name: mypy
-        entry: mypy
+        entry: mypy src/stateloom/
         language: system
         types: [python]
         files: ^src/stateloom/
         exclude: ^tests/
+        pass_filenames: false
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
