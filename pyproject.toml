@@ -59,7 +59,7 @@ litellm = ["litellm>=1.40"]
 openclaw = ["nodeenv>=1.9"]
 all = ["stateloom[presidio]", "stateloom[langchain]", "stateloom[langgraph]", "stateloom[semantic]", "stateloom[ner]", "stateloom[redis]", "stateloom[postgres]", "stateloom[metrics]", "stateloom[tracing]", "stateloom[prompts]", "stateloom[migrations]", "stateloom[mistral]", "stateloom[cohere]", "stateloom[litellm]", "stateloom[auth]", "stateloom[openclaw]"]
 typecheck = [
-    "mypy==1.19.1",
+    "mypy==1.20.1",
     "openai>=1.0",
     "anthropic>=0.39",
     "google-generativeai>=0.4",
@@ -75,7 +75,7 @@ dev = [
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.0",
     "ruff>=0.14,<1.0",
-    "mypy==1.19.1",
+    "mypy==1.20.1",
     "respx>=0.20",
     "openai>=1.0",
     "anthropic>=0.39",
