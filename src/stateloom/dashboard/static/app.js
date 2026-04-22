@@ -29,6 +29,26 @@ let _eventFilterHidden = new Set(
     JSON.parse(localStorage.getItem('stateloom_eventFilterHidden') || '[]')
 );
 
+function _dashboardApiKey() {
+    return new URLSearchParams(location.search).get('api_key') || '';
+}
+
+function _withDashboardApiKey(url) {
+    const apiKey = _dashboardApiKey();
+    if (!apiKey) return url;
+    try {
+        const resolved = new URL(url, window.location.origin);
+        if (!resolved.searchParams.has('api_key')) {
+            resolved.searchParams.set('api_key', apiKey);
+        }
+        return resolved.origin === window.location.origin
+            ? `${resolved.pathname}${resolved.search}${resolved.hash}`
+            : resolved.toString();
+    } catch {
+        return url;
+    }
+}
+
 function _saveEventFilterState() {
     localStorage.setItem('stateloom_eventFilterHidden', JSON.stringify([..._eventFilterHidden]));
 }
@@ -123,7 +143,7 @@ function switchView(view) {
 // --- WebSocket ---
 function connectWebSocket() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${location.host}/ws`);
+    ws = new WebSocket(_withDashboardApiKey(`${protocol}//${location.host}/ws`));
 
     ws.onopen = () => {
         document.getElementById('ws-status').textContent = 'Connected';
@@ -158,7 +178,7 @@ function connectWebSocket() {
 // --- Data Loading ---
 async function fetchJSON(path, options) {
     try {
-        const res = await fetch(`${API_BASE}${path}`, options);
+        const res = await fetch(_withDashboardApiKey(`${API_BASE}${path}`), options);
         if (!res.ok) {
             const body = await res.text();
             let detail = '';
@@ -176,7 +196,7 @@ async function fetchJSON(path, options) {
 /** Like fetchJSON but silently returns null on errors (no toast). */
 async function fetchJSONSilent(path, options) {
     try {
-        const res = await fetch(`${API_BASE}${path}`, options);
+        const res = await fetch(_withDashboardApiKey(`${API_BASE}${path}`), options);
         if (!res.ok) return null;
         return await res.json();
     } catch { return null; }
@@ -5282,7 +5302,7 @@ function _connectLogsWebSocket() {
     }
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    _logsWs = new WebSocket(`${protocol}//${location.host}/ws/logs`);
+    _logsWs = new WebSocket(_withDashboardApiKey(`${protocol}//${location.host}/ws/logs`));
 
     _logsWs.onopen = () => {
         const dot = document.getElementById('logs-ws-dot');

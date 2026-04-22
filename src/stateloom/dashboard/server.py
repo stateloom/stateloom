@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +27,80 @@ if TYPE_CHECKING:
 logger = logging.getLogger("stateloom.dashboard")
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _extract_dashboard_credential(headers: Any, query_params: Any) -> str:
+    """Extract a dashboard credential from Authorization or api_key.
+
+    Web browsers cannot set arbitrary headers on WebSocket upgrades, so the
+    dashboard also accepts ``?api_key=...`` on both HTTP and WebSocket routes.
+    """
+    auth_header = headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:]
+    return query_params.get("api_key", "")
+
+
+def _make_dashboard_api_key_user() -> Any:
+    """Return the synthetic system user used for legacy dashboard API keys."""
+    from stateloom.auth.models import User
+    from stateloom.core.types import Role
+
+    return User(
+        id="usr-system",
+        email="system@stateloom.local",
+        display_name="System (API Key)",
+        org_role=Role.ORG_ADMIN,
+        email_verified=True,
+        is_active=True,
+    )
+
+
+def _resolve_dashboard_principal(
+    gate: Gate,
+    credential: str,
+    api_key: str,
+) -> tuple[Any, list[Any]] | None:
+    """Resolve dashboard auth via JWT first, then the legacy API key."""
+    if gate.config.auth.enabled and credential:
+        try:
+            from stateloom.auth.jwt import _get_jwt_secret, decode_access_token
+
+            jwt_secret = _get_jwt_secret(gate.store, gate.config)
+            payload = decode_access_token(
+                credential,
+                jwt_secret,
+                algorithm=gate.config.auth.jwt_algorithm,
+            )
+            if payload and payload.sub:
+                user = gate.store.get_user(payload.sub)
+                if user and user.is_active:
+                    return user, gate.store.get_user_team_roles(user.id)
+        except Exception as exc:
+            logger.debug("JWT decode failed: %s", exc)
+
+    if api_key and credential and secrets.compare_digest(credential, api_key):
+        return _make_dashboard_api_key_user(), []
+
+    return None
+
+
+def _dashboard_auth_error_detail(auth_enabled: bool, credential: str) -> str:
+    """Return the user-facing error detail for dashboard auth failures."""
+    if not credential:
+        return "No credentials provided. Send API key or JWT in Authorization header."
+    if auth_enabled:
+        return "Invalid credentials. JWT token may be expired or malformed."
+    return "Invalid API key. Check your dashboard_api_key configuration."
+
+
+def _dashboard_websocket_close_reason(auth_enabled: bool, credential: str) -> str:
+    """Short WebSocket close reason matching the HTTP auth errors."""
+    if not credential:
+        return "Missing credentials"
+    if auth_enabled:
+        return "Invalid credentials"
+    return "Invalid API key"
 
 
 def _port_in_use(host: str, port: int) -> bool:
@@ -153,7 +227,8 @@ class DashboardServer:
             return response
 
         # API key / JWT dual-mode authentication middleware
-        if self._requires_auth() or self.gate.config.auth.enabled:
+        auth_required = self._requires_auth() or self.gate.config.auth.enabled
+        if auth_required:
             api_key = self.gate.config.dashboard_config.api_key
             if not api_key and not self.gate.config.auth.enabled:
                 # Auto-generate a key when binding to non-loopback without explicit key
@@ -164,6 +239,13 @@ class DashboardServer:
                     "Auto-generated API key: %s",
                     api_key,
                 )
+
+            def _authenticate_dashboard_client(
+                headers: Any,
+                query_params: Any,
+            ) -> tuple[Any, list[Any]] | None:
+                credential = _extract_dashboard_credential(headers, query_params)
+                return _resolve_dashboard_principal(self.gate, credential, api_key)
 
             @app.middleware("http")
             async def auth_middleware(
@@ -186,69 +268,16 @@ class DashboardServer:
                 )
                 if any(path.startswith(p) for p in skip_prefixes):
                     return await call_next(request)
-                if path.startswith("/ws"):
-                    # WebSocket upgrade requests bypass auth (browser can't set headers)
-                    return await call_next(request)
                 if not path.startswith(("/api/", "/metrics")):
                     return await call_next(request)
 
-                auth_header = request.headers.get("Authorization", "")
-                query_key = request.query_params.get("api_key", "")
-                provided_key = ""
-                if auth_header.startswith("Bearer "):
-                    provided_key = auth_header[7:]
-                elif query_key:
-                    provided_key = query_key
+                provided_key = _extract_dashboard_credential(request.headers, request.query_params)
+                resolved = _authenticate_dashboard_client(request.headers, request.query_params)
+                if resolved is not None:
+                    request.state.user, request.state.team_roles = resolved
+                    return await call_next(request)
 
-                # Try 1: JWT decode (when auth_enabled)
-                if self.gate.config.auth.enabled and provided_key:
-                    try:
-                        from stateloom.auth.jwt import (
-                            _get_jwt_secret,
-                            decode_access_token,
-                        )
-
-                        jwt_secret = _get_jwt_secret(self.gate.store, self.gate.config)
-                        payload = decode_access_token(
-                            provided_key,
-                            jwt_secret,
-                            algorithm=self.gate.config.auth.jwt_algorithm,
-                        )
-                        if payload and payload.sub:
-                            user = self.gate.store.get_user(payload.sub)
-                            if user and user.is_active:
-                                request.state.user = user
-                                request.state.team_roles = self.gate.store.get_user_team_roles(
-                                    user.id
-                                )
-                                return await call_next(request)
-                    except Exception as exc:
-                        logger.debug("JWT decode failed: %s", exc)
-
-                # Try 2: Legacy API key
-                if api_key and provided_key:
-                    if secrets.compare_digest(provided_key, api_key):
-                        # Synthetic system user with org_admin
-                        from stateloom.auth.models import User
-                        from stateloom.core.types import Role
-
-                        request.state.user = User(
-                            id="usr-system",
-                            email="system@stateloom.local",
-                            display_name="System (API Key)",
-                            org_role=Role.ORG_ADMIN,
-                            email_verified=True,
-                            is_active=True,
-                        )
-                        request.state.team_roles = []
-                        return await call_next(request)
-
-                if not provided_key:
-                    detail = "No credentials provided. Send API key or JWT in Authorization header."
-                elif self.gate.config.auth.enabled:
-                    detail = "Invalid credentials. JWT token may be expired or malformed."
-                else:
-                    detail = "Invalid API key. Check your dashboard_api_key configuration."
+                detail = _dashboard_auth_error_detail(self.gate.config.auth.enabled, provided_key)
                 return JSONResponse(
                     status_code=401,
                     content={"detail": detail},
@@ -337,13 +366,53 @@ class DashboardServer:
 
         # WebSocket
         ws_route = create_websocket_route(self.gate)
-        app.add_api_websocket_route("/ws", ws_route)
+
+        async def dashboard_ws_route(websocket: WebSocket) -> None:
+            if auth_required:
+                provided_key = _extract_dashboard_credential(
+                    websocket.headers,
+                    websocket.query_params,
+                )
+                resolved = _authenticate_dashboard_client(websocket.headers, websocket.query_params)
+                if resolved is None:
+                    await websocket.close(
+                        code=1008,
+                        reason=_dashboard_websocket_close_reason(
+                            self.gate.config.auth.enabled,
+                            provided_key,
+                        ),
+                    )
+                    return
+                websocket.state.user, websocket.state.team_roles = resolved
+            await ws_route(websocket)
+
+        app.add_api_websocket_route("/ws", dashboard_ws_route)
 
         # WebSocket for live log streaming (debug mode)
         from stateloom.dashboard.ws import create_log_websocket_route
 
         log_ws_route = create_log_websocket_route(self.gate)
-        app.add_api_websocket_route("/ws/logs", log_ws_route)
+
+        async def dashboard_log_ws_route(websocket: WebSocket) -> None:
+            if auth_required:
+                provided_key = _extract_dashboard_credential(
+                    websocket.headers,
+                    websocket.query_params,
+                )
+                resolved = _authenticate_dashboard_client(websocket.headers, websocket.query_params)
+                if resolved is None:
+                    await websocket.close(
+                        code=1008,
+                        reason=_dashboard_websocket_close_reason(
+                            self.gate.config.auth.enabled,
+                            provided_key,
+                        ),
+                    )
+                    return
+                websocket.state.user, websocket.state.team_roles = resolved
+            await log_ws_route(websocket)
+
+        app.add_api_websocket_route("/ws/logs", dashboard_log_ws_route)
 
         # Shared sticky session manager for all proxy routers
         from stateloom.proxy.sticky_session import StickySessionManager
