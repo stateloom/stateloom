@@ -58,6 +58,7 @@ from stateloom.core.types import (
 from stateloom.gate import Gate
 from stateloom.middleware.auto_router import RoutingContext
 from stateloom.mock import MockSession
+from stateloom.refine import RefineNode, RefineResult, ScoreResult
 
 logger = logging.getLogger("stateloom")
 
@@ -1446,6 +1447,93 @@ def retry_loop(
     return RetryLoop(retries=retries, **kwargs)
 
 
+def refine_loop(
+    generator: Callable[[Any], Any],
+    scorer: Callable[[Any], Any],
+    *,
+    max_attempts: int = 3,
+    threshold: float | None = None,
+    direction: str = "max",
+    on_attempt: Callable[[Any], None] | None = None,
+) -> Any:
+    """Run an evaluator-driven refinement loop.
+
+    Usage::
+
+        def gen(history):
+            return client.chat.completions.create(...)
+
+        def score(candidate):
+            ok, feedback = validate(candidate)
+            return stateloom.ScoreResult(score=1.0 if ok else 0.0, feedback=feedback)
+
+        result = stateloom.refine_loop(
+            gen, score, max_attempts=3, threshold=1.0
+        )
+        print(result.best.result, result.threshold_met)
+    """
+    from stateloom.refine import refine_loop as _rl
+
+    return _rl(
+        generator=generator,
+        scorer=scorer,
+        max_attempts=max_attempts,
+        threshold=threshold,
+        direction=direction,  # type: ignore[arg-type]
+        on_attempt=on_attempt,
+    )
+
+
+def durable_refine(
+    *,
+    scorer: Callable[[Any], Any],
+    max_attempts: int = 3,
+    threshold: float | None = None,
+    direction: str = "max",
+    session_id: str | None = None,
+    name: str | None = None,
+    budget: float | None = None,
+    on_attempt: Callable[[Any], None] | None = None,
+) -> Callable[..., Any]:
+    """Decorator: durable session + evaluator-driven refinement loop.
+
+    The wrapped function must accept ``history: list[RefineNode]`` as a
+    keyword argument.  Crash-safe: on resume, cached LLM responses for
+    already-scored attempts replay without hitting the network.
+
+    Usage::
+
+        @stateloom.durable_refine(scorer=score_json, threshold=1.0, max_attempts=3)
+        def generate(prompt, *, history):
+            messages = [{"role": "user", "content": prompt}]
+            messages += stateloom.format_history_as_messages(history)
+            return client.chat.completions.create(model="gpt-4", messages=messages)
+    """
+    from stateloom.refine import durable_refine as _dr
+
+    return _dr(
+        scorer=scorer,
+        max_attempts=max_attempts,
+        threshold=threshold,
+        direction=direction,  # type: ignore[arg-type]
+        session_id=session_id,
+        name=name,
+        budget=budget,
+        on_attempt=on_attempt,
+    )
+
+
+def format_history_as_messages(
+    history: list[Any],
+    *,
+    style: str = "openai",
+) -> list[dict[str, Any]]:
+    """Format refinement history as a chat transcript (openai or anthropic style)."""
+    from stateloom.refine import format_history_as_messages as _fhm
+
+    return _fhm(history, style=style)  # type: ignore[arg-type]
+
+
 def checkpoint(label: str, description: str = "") -> None:
     """Create a named checkpoint in the current session.
 
@@ -2090,7 +2178,13 @@ __all__ = [
     "create_virtual_key",
     "delete_local_model",
     "DebateRound",
+    "durable_refine",
     "durable_task",
+    "format_history_as_messages",
+    "RefineNode",
+    "RefineResult",
+    "refine_loop",
+    "ScoreResult",
     "Persona",
     "experiment_metrics",
     "export_session",

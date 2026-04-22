@@ -177,6 +177,7 @@ Auto-detects and patches installed LLM clients:
 ### Reliability & testing
 
 - **Semantic Retries** — automatic retries for bad JSON, hallucinated tool calls, and other LLM output failures. Combine with durable sessions for retry loops that don't re-pay for completed steps.
+- **Refinement Loops** — scored retry: scorer returns a numerical score + feedback, loop keeps the best and refines with the history. Crash-safe under durable sessions.
 - **Circuit Breaker** — per-provider failover with tier-based model alternatives and health probes for recovery detection.
 - **Model Testing** — shadow traffic comparison with automated quality scoring, migration readiness reports, and similarity analysis. Fire-and-forget candidate calls.
 - **Time-Travel Debugging** — replay a failed agent run from any step with network safety (outbound HTTP blocked during replay).

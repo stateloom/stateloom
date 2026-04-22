@@ -138,7 +138,7 @@ Hardware detection recommends Ollama models based on available RAM/GPU. Auto-rou
 Temporal-like checkpointing: LLM responses are persisted so a crashed process can resume from the last completed step without re-calling the API. Supports both sync and async sessions.
 
 ### Semantic Retries
-`retry_loop(retries=3)` retries LLM calls when output validation fails (bad JSON, missing fields, hallucinated tool calls). `durable_task()` combines durable sessions with automatic retries for zero wasted API calls on resume.
+`retry_loop(retries=3)` retries LLM calls when output validation fails (bad JSON, missing fields, hallucinated tool calls). `durable_task()` combines durable sessions with automatic retries for zero wasted API calls on resume. For the scored variant — where a scorer returns a number plus feedback and the generator refines with history — see `refine_loop()` / `durable_refine()` ([reference](../docs/reference.md#refinement-loops-scored-retry)).
 
 ### Time-Travel Debugging
 Record a multi-step session, then replay it deterministically with network blocking. Export sessions as portable JSON bundles. `stateloom.mock()` provides VCR-cassette style recording for test suites.

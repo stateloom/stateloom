@@ -43,6 +43,7 @@ class EventType(str, Enum):
     RATE_LIMIT = "rate_limit"
     ASYNC_JOB = "async_job"
     SEMANTIC_RETRY = "semantic_retry"
+    REFINE_ATTEMPT = "refine_attempt"
     CHECKPOINT = "checkpoint"
     CIRCUIT_BREAKER = "circuit_breaker"
     SUSPENSION = "suspension"

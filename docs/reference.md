@@ -1380,6 +1380,88 @@ with stateloom.session("task-123", durable=True) as s:
 | `budget` | `None` | Per-session budget in USD |
 | `on_retry` | `None` | Callback `(attempt, error)` fired on each retry |
 
+## Refinement Loops (Scored Retry)
+
+Semantic retry treats each attempt as pass/fail. Refinement loops generalise that: you supply a **scorer** that returns a number plus feedback, and the generator conditions on a running history of `(candidate, score, feedback)` nodes to refine its next attempt. The loop keeps the best-scoring node and can early-stop on a threshold.
+
+This maps cleanly onto real production patterns: JSON schema validation with partial credit, SQL planner feedback, test-runner scores, scored structured extraction.
+
+### `refine_loop` — inline
+
+```python
+import json, jsonschema
+
+SCHEMA = {...}
+
+def score(candidate: str) -> stateloom.ScoreResult:
+    try:
+        data = json.loads(candidate)
+        jsonschema.validate(data, SCHEMA)
+        return stateloom.ScoreResult(score=1.0, feedback="")
+    except jsonschema.ValidationError as e:
+        return stateloom.ScoreResult(score=0.0, feedback=str(e))
+
+def generate(history: list[stateloom.RefineNode]) -> str:
+    messages = [{"role": "user", "content": "Extract fields as JSON."}]
+    messages += stateloom.format_history_as_messages(history)
+    resp = client.chat.completions.create(model="gpt-4o", messages=messages)
+    return resp.choices[0].message.content
+
+result = stateloom.refine_loop(
+    generate,
+    score,
+    max_attempts=3,
+    threshold=1.0,
+)
+print(result.best.result, result.threshold_met)
+```
+
+### `durable_refine` — decorator
+
+Wraps the generator in a fresh durable session. On resume, cached LLM responses from previous attempts replay for free; only un-run attempts hit the network.
+
+```python
+@stateloom.durable_refine(
+    scorer=score,
+    max_attempts=3,
+    threshold=1.0,
+    session_id="extract-42",
+)
+def generate(prompt: str, *, history: list[stateloom.RefineNode]) -> str:
+    messages = [{"role": "user", "content": prompt}]
+    messages += stateloom.format_history_as_messages(history)
+    return client.chat.completions.create(model="gpt-4o", messages=messages).choices[0].message.content
+
+result = generate("Extract fields as JSON.")
+```
+
+Async functions are also supported — `durable_refine` dispatches on `inspect.iscoroutinefunction` the same way `durable_task` does.
+
+### How it works
+
+- One durable session spans all attempts; the step counter advances monotonically, so on resume each attempt's cached LLM response replays in order before any live calls are made.
+- `ScoreResult` carries an optional `feedback` string and `metadata` dict. Scorers may also return a plain `float` for score-only use.
+- Early stop: `threshold` is crossed when `score >= threshold` (for `direction="max"`) or `score <= threshold` (for `direction="min"`).
+- Non-retryable errors (`StateLoomBudgetError`, `StateLoomPIIBlockedError`, `StateLoomKillSwitchError`, …) propagate immediately and are **not** counted as attempts.
+- Generic scorer exceptions are logged and the attempt is recorded with a sentinel worst-case score (`-inf` for max, `+inf` for min); the loop continues.
+- Each attempt records a `RefineAttemptEvent` (event type `refine_attempt`) to the store — visible in the dashboard waterfall with `attempt X/N · score Y · best Z` and a ✅ when the threshold is crossed.
+
+### Caveat: scorer determinism under durable replay
+
+On durable resume, cached LLM responses replay and the scorer re-runs on those replayed outputs. If the scorer itself is non-deterministic (for example, an LLM-judge call with `temperature > 0`), the replayed score may differ from the original and the loop may diverge. The recommended mitigation is to run any scorer LLM calls through `stateloom.client` / a wrapped SDK so those responses are also durable-cached.
+
+### Configuration
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `max_attempts` | `3` | Maximum refinement iterations |
+| `threshold` | `None` | Early-stop score threshold |
+| `direction` | `"max"` | `"max"` (higher is better) or `"min"` |
+| `session_id` | auto | Fixed session ID for durable resume (`durable_refine` only) |
+| `name` | function name | Session name (`durable_refine` only) |
+| `budget` | `None` | Per-session budget in USD (`durable_refine` only) |
+| `on_attempt` | `None` | Callback `(RefineNode)` fired after each scored attempt |
+
 ## Named Checkpoints
 
 Mark milestones within a session for observability and debugging. Checkpoint events appear in the dashboard waterfall timeline as labeled dividers.

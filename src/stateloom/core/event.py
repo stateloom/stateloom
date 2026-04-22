@@ -229,6 +229,22 @@ class SemanticRetryEvent(Event):
     resolved: bool = False
 
 
+class RefineAttemptEvent(Event):
+    """One scored attempt in a refinement loop."""
+
+    event_type: Literal[EventType.REFINE_ATTEMPT] = EventType.REFINE_ATTEMPT
+    attempt: int = Field(default=0, ge=0)
+    max_attempts: int = Field(default=0, ge=0)
+    score: float = 0.0
+    best_score_so_far: float = 0.0
+    feedback_summary: str = ""
+    threshold: float | None = None
+    direction: str = "max"
+    threshold_met: bool = False
+    provider: str = ""
+    model: str = ""
+
+
 class CheckpointEvent(Event):
     """A named checkpoint within a session."""
 
@@ -362,6 +378,7 @@ AnyEvent = Annotated[
     | ComplianceAuditEvent
     | RateLimitEvent
     | SemanticRetryEvent
+    | RefineAttemptEvent
     | CheckpointEvent
     | CircuitBreakerEvent
     | SuspensionEvent

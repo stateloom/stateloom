@@ -784,6 +784,7 @@ function getStepDotClass(e) {
         case 'guardrail': return (e.action_taken || '').toLowerCase() === 'blocked' ? 'step-dot-error' : 'step-dot-pii';
         case 'rate_limit': return (e.rejected || e.timed_out) ? 'step-dot-error' : 'step-dot-pii';
         case 'semantic_retry': return e.resolved ? 'step-dot-cache' : 'step-dot-error';
+        case 'refine_attempt': return e.threshold_met ? 'step-dot-cache' : 'step-dot-default';
         case 'checkpoint': return 'step-dot-cache';
         case 'session_lifecycle': return 'step-dot-error';
         default: return 'step-dot-default';
@@ -1770,6 +1771,7 @@ function getWaterfallTypeBadge(event) {
         'circuit_breaker': 'wf-type-kill',
         'loop_detection': 'wf-type-loop',
         'semantic_retry': 'wf-type-retry',
+        'refine_attempt': 'wf-type-retry',
         'checkpoint': 'wf-type-checkpoint',
         'rate_limit': 'wf-type-rate-limit',
         'guardrail': 'wf-type-pii',
@@ -1788,6 +1790,7 @@ function getWaterfallTypeBadge(event) {
         'circuit_breaker': 'CB',
         'loop_detection': 'Loop',
         'semantic_retry': 'Retry',
+        'refine_attempt': 'Refine',
         'checkpoint': 'Checkpoint',
         'rate_limit': 'Rate Limit',
         'tool_call': 'Tool',
@@ -1806,6 +1809,7 @@ function getDurationBarClass(event) {
     if (type === 'local_routing') return event.routing_success ? 'wf-bar-local' : 'wf-bar-llm';
     if (type === 'shadow_draft') return 'wf-bar-shadow';
     if (type === 'semantic_retry') return 'wf-bar-retry';
+    if (type === 'refine_attempt') return 'wf-bar-retry';
     if (type === 'pii_detection') return 'wf-bar-pii';
     return 'wf-bar-default';
 }
@@ -1904,6 +1908,12 @@ function getSubRowContext(event) {
     }
     if (type === 'shadow_draft') return event.local_model || '';
     if (type === 'semantic_retry') return `attempt ${event.attempt || '?'}/${event.max_attempts || '?'}`;
+    if (type === 'refine_attempt') {
+        const s = (event.score != null) ? Number(event.score).toFixed(2) : '?';
+        const b = (event.best_score_so_far != null) ? Number(event.best_score_so_far).toFixed(2) : '?';
+        const check = event.threshold_met ? ' \u2705' : '';
+        return `attempt ${event.attempt || '?'}/${event.max_attempts || '?'} \u00b7 score ${s} \u00b7 best ${b}${check}`;
+    }
     if (type === 'blast_radius') return event.trigger || '';
     if (type === 'rate_limit') return event.team_id || '';
     if (type === 'guardrail') return event.rule_name || event.category || '';

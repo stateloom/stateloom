@@ -18,7 +18,7 @@ from stateloom import init, session, chat, Client, StateLoomError
 - [Tool Tracking](#tool-tracking) — `@tool()`
 - [Experiments](#experiments) — `create_experiment()`, `start_experiment()`, `feedback()`, `leaderboard()`, `backtest()`
 - [Consensus](#consensus-multi-agent-debate) — `consensus()`, `consensus_sync()`, `ConsensusResult`
-- [Replay & Durable Sessions](#replay--durable-sessions) — `replay()`, `durable_task()`, `retry_loop()`, `mock()`
+- [Replay & Durable Sessions](#replay--durable-sessions) — `replay()`, `durable_task()`, `retry_loop()`, `refine_loop()`, `durable_refine()`, `mock()`
 - [Local Models](#local-models) — `pull_model()`, `list_local_models()`, `recommend_models()`, `hot_swap_model()`
 - [Auto-Routing](#auto-routing) — `set_auto_route_scorer()`, `RoutingContext`
 - [Kill Switch](#kill-switch) — `kill_switch()`, `add_kill_switch_rule()`
@@ -1165,6 +1165,114 @@ Each iteration yields a `RetryAttempt` context manager. Exceptions inside `with 
 
 ---
 
+### `refine_loop(generator, scorer, *, max_attempts=3, threshold=None, direction="max", on_attempt=None) -> RefineResult`
+
+Evaluator-driven refinement: the scorer returns a numerical score (plus optional feedback and metadata), and the generator conditions on the running history of `(candidate, score, feedback)` nodes to refine its next attempt. Returns the best-scoring node plus the full trajectory.
+
+```python
+import json, jsonschema
+
+SCHEMA = {...}
+
+def score(candidate: str) -> stateloom.ScoreResult:
+    try:
+        data = json.loads(candidate)
+        jsonschema.validate(data, SCHEMA)
+        return stateloom.ScoreResult(score=1.0, feedback="")
+    except jsonschema.ValidationError as e:
+        return stateloom.ScoreResult(score=0.0, feedback=str(e))
+
+def generate(history: list[stateloom.RefineNode]) -> str:
+    messages = [{"role": "user", "content": "Extract fields as JSON."}]
+    messages += stateloom.format_history_as_messages(history)
+    resp = client.chat.completions.create(model="gpt-4o", messages=messages)
+    return resp.choices[0].message.content
+
+result = stateloom.refine_loop(generate, score, max_attempts=3, threshold=1.0)
+print(result.best.result, result.threshold_met, result.attempts_used)
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `generator` | `Callable[[list[RefineNode]], Any]` | required | Receives running history, returns a candidate |
+| `scorer` | `Callable[[Any], float \| ScoreResult]` | required | Plain `float` or a `ScoreResult` carrying score + feedback |
+| `max_attempts` | `int` | `3` | Maximum refinement iterations |
+| `threshold` | `float \| None` | `None` | Early-stop threshold (`>=` for `max`, `<=` for `min`) |
+| `direction` | `"max" \| "min"` | `"max"` | Whether higher or lower scores are better |
+| `on_attempt` | `Callable[[RefineNode], None] \| None` | `None` | Progress callback invoked after each scored attempt |
+
+**Behaviour:**
+
+- Scorer may return a plain `float` (score only) or a `ScoreResult(score, feedback, metadata)`. Feedback is surfaced in the next generator's history.
+- Non-retryable errors (`StateLoomBudgetError`, `StateLoomPIIBlockedError`, `StateLoomKillSwitchError`, …) propagate immediately and are **not** counted as attempts.
+- Generic scorer exceptions are logged and the attempt is recorded with a sentinel worst-case score (`-inf` for `max`, `+inf` for `min`); the loop continues.
+- When inside a `stateloom.session()`, each attempt persists a `RefineAttemptEvent` (event type `refine_attempt`) — visible in the dashboard waterfall.
+- Works inside or outside a session; when combined with `durable=True`, cached LLM responses from prior attempts replay on resume (see `durable_refine` for the decorator form).
+
+---
+
+### `durable_refine(*, scorer, max_attempts=3, threshold=None, direction="max", session_id=None, name=None, budget=None, on_attempt=None)`
+
+Decorator combining a fresh durable session with `refine_loop`. The wrapped function must accept `history: list[RefineNode]` as a keyword argument. On crash recovery, cached LLM responses from previously-scored attempts replay for free — only attempts that didn't finish re-execute live. Supports both sync and async functions (dispatch via `inspect.iscoroutinefunction`).
+
+```python
+@stateloom.durable_refine(
+    scorer=score,
+    max_attempts=3,
+    threshold=1.0,
+    session_id="extract-42",
+)
+def generate(prompt: str, *, history: list[stateloom.RefineNode]) -> str:
+    messages = [{"role": "user", "content": prompt}]
+    messages += stateloom.format_history_as_messages(history)
+    return client.chat.completions.create(model="gpt-4o", messages=messages).choices[0].message.content
+
+result = generate("Extract fields as JSON.")  # returns RefineResult
+
+# Async
+@stateloom.durable_refine(scorer=score, max_attempts=3, threshold=1.0)
+async def async_generate(prompt: str, *, history: list[stateloom.RefineNode]) -> str:
+    ...
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `scorer` | `Callable[[Any], float \| ScoreResult]` | required | Same as `refine_loop` |
+| `max_attempts` | `int` | `3` | Maximum refinement iterations |
+| `threshold` | `float \| None` | `None` | Early-stop score threshold |
+| `direction` | `"max" \| "min"` | `"max"` | Optimisation direction |
+| `session_id` | `str \| None` | auto | Fixed session ID (enables durable resume across restarts) |
+| `name` | `str \| None` | function name | Session name |
+| `budget` | `float \| None` | `None` | Per-session budget in USD |
+| `on_attempt` | `Callable[[RefineNode], None] \| None` | `None` | Progress callback |
+
+**Caveat:** On durable resume the scorer re-runs against replayed outputs. If the scorer itself is non-deterministic (e.g. an LLM-judge with `temperature > 0`) the replayed score may differ. Route scorer LLM calls through `stateloom.client` / a wrapped SDK so those responses are also durable-cached.
+
+---
+
+### `format_history_as_messages(history, *, style="openai") -> list[dict]`
+
+Helper that formats a `list[RefineNode]` as a chat transcript — a minimal `(assistant-result, user-feedback)` exchange per attempt. Optional; generators are free to format history however they want.
+
+```python
+messages = [{"role": "system", "content": "You are a JSON generator."}]
+messages += stateloom.format_history_as_messages(history, style="openai")
+messages.append({"role": "user", "content": "Try again."})
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `history` | `list[RefineNode]` | required | Running history from `refine_loop` |
+| `style` | `"openai" \| "anthropic"` | `"openai"` | Output shape — plain strings or content-block lists |
+
+---
+
 ### `mock(session_id=None, *, force_record=False, network_block=True, allow_hosts=None) -> MockSession`
 
 VCR-cassette mock: record LLM calls once, replay forever. Returns a `MockSession` usable as both a decorator and a context manager.
@@ -2156,7 +2264,7 @@ except StateLoomBudgetError as e:
 
 ### Non-Retryable Errors
 
-These errors propagate immediately through `durable_task()` and `retry_loop()` — they are never retried:
+These errors propagate immediately through `durable_task()`, `retry_loop()`, `refine_loop()`, and `durable_refine()` — they are never retried:
 
 - `StateLoomBudgetError`
 - `StateLoomPIIBlockedError`
@@ -2185,6 +2293,9 @@ Key types importable from `stateloom` or their source modules.
 | `Client` | `stateloom` | Unified provider-agnostic chat client |
 | `ChatResponse` | `stateloom` | Response wrapper from `chat()` / `achat()` |
 | `MockSession` | `stateloom` | VCR-cassette record/replay for testing |
+| `ScoreResult` | `stateloom` | Scorer return value for `refine_loop` — `score` + optional `feedback` + `metadata` |
+| `RefineNode` | `stateloom` | One attempt in a refinement trajectory — `attempt`, `result`, `score`, `feedback`, `metadata` |
+| `RefineResult` | `stateloom` | Final outcome of `refine_loop` — `best`, `history`, `threshold_met`, `attempts_used` |
 | `RoutingContext` | `stateloom` | Context passed to custom auto-routing scorers |
 | `Organization` | `stateloom` | Multi-tenant organization model |
 | `Team` | `stateloom` | Multi-tenant team model |
@@ -2204,4 +2315,4 @@ Key types importable from `stateloom` or their source modules.
 | `Provider` | `stateloom.core.types` | Enum: `OPENAI`, `ANTHROPIC`, `GEMINI`, `MISTRAL`, `COHERE`, `LITELLM`, `LOCAL`, `UNKNOWN` |
 | `BillingMode` | `stateloom.core.types` | Enum: `API`, `SUBSCRIPTION` |
 | `SessionStatus` | `stateloom.core.types` | Enum: `ACTIVE`, `COMPLETED`, `BUDGET_EXCEEDED`, `LOOP_KILLED`, `ERROR`, `PAUSED`, `SUSPENDED`, `TIMED_OUT`, `CANCELLED` |
-| `EventType` | `stateloom.core.types` | Enum: `LLM_CALL`, `TOOL_CALL`, `CACHE_HIT`, `PII_DETECTION`, `SHADOW_DRAFT`, `LOCAL_ROUTING`, `KILL_SWITCH`, `BLAST_RADIUS`, `RATE_LIMIT`, `CHECKPOINT`, `CIRCUIT_BREAKER`, `COMPLIANCE_AUDIT`, `SEMANTIC_RETRY`, `SUSPENSION`, `ASYNC_JOB`, `DEBATE_ROUND`, `CONSENSUS`, and more |
+| `EventType` | `stateloom.core.types` | Enum: `LLM_CALL`, `TOOL_CALL`, `CACHE_HIT`, `PII_DETECTION`, `SHADOW_DRAFT`, `LOCAL_ROUTING`, `KILL_SWITCH`, `BLAST_RADIUS`, `RATE_LIMIT`, `CHECKPOINT`, `CIRCUIT_BREAKER`, `COMPLIANCE_AUDIT`, `SEMANTIC_RETRY`, `REFINE_ATTEMPT`, `SUSPENSION`, `ASYNC_JOB`, `DEBATE_ROUND`, `CONSENSUS`, and more |
