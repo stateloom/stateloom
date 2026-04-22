@@ -263,6 +263,8 @@ pip install stateloom[all]          # Everything
 
 Starts automatically at `localhost:4782`. Live session viewer, REST API, and WebSocket event streaming.
 
+If you protect the dashboard with `dashboard_api_key` (or bind it to a non-loopback host and let StateLoom auto-generate one), open the UI as `http://host:4782/?api_key=...`. The web client will reuse that credential for its REST calls and WebSocket streams.
+
 ![Session detail with waterfall trace, child sessions, and org/team budgets](assets/session-example.png)
 
 ![Full event detail — model, tokens, cost, latency, request messages](assets/full_prompt_preview.png)
